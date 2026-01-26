@@ -10,11 +10,25 @@ const app = express();
 
 // ================= CONFIG =================
 const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/quiz-app";
+const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority";
 const JWT_SECRET = process.env.JWT_SECRET || "shamsi-institute-quiz-secret-key-2024";
 
 // ================= MIDDLEWARE =================
-app.use(cors());
+// CORS configuration for Vercel
+const corsOptions = {
+  origin: [
+    'https://quiz2-iota-one.vercel.app',
+    'https://quiz2-bsil5hk4z-khalids-projects-3de9ee65.vercel.app',
+    'https://shamsi-quiz.vercel.app',
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://localhost:5000'
+  ],
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -22,7 +36,10 @@ app.use(express.urlencoded({ extended: true }));
 const connectDB = async () => {
   try {
     if (mongoose.connection.readyState === 0) {
-      await mongoose.connect(MONGO_URI);
+      await mongoose.connect(MONGO_URI, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+      });
       console.log("✅ MongoDB Connected Successfully");
     }
   } catch (err) {
@@ -156,7 +173,9 @@ app.get("/api/health", async (req, res) => {
     res.json({
       success: true,
       message: "Server is healthy",
-      database: mongoose.connection.readyState === 1 ? "Connected" : "Disconnected"
+      database: mongoose.connection.readyState === 1 ? "Connected" : "Disconnected",
+      environment: process.env.NODE_ENV || "development",
+      url: req.protocol + '://' + req.get('host')
     });
   } catch (error) {
     res.status(500).json({
@@ -1076,19 +1095,23 @@ app.use((req, res) => {
 });
 
 // ================= START SERVER =================
-app.listen(PORT, async () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📋 MongoDB URI: ${MONGO_URI ? "Configured" : "Not configured"}`);
-  
-  // Initialize database
-  try {
-    await connectDB();
-    await initializeAdmin();
-    await initializeConfig();
-    console.log("✅ Database initialized successfully");
-  } catch (error) {
-    console.error("❌ Database initialization failed:", error);
-  }
-});
-
+// For Vercel serverless deployment
 export default app;
+
+// For local development
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, async () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`📋 MongoDB URI: ${MONGO_URI ? "Configured" : "Not configured"}`);
+    
+    // Initialize database
+    try {
+      await connectDB();
+      await initializeAdmin();
+      await initializeConfig();
+      console.log("✅ Database initialized successfully");
+    } catch (error) {
+      console.error("❌ Database initialization failed:", error);
+    }
+  });
+}
