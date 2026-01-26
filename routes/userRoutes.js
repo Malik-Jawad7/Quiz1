@@ -52,12 +52,11 @@ router.post('/register', async (req, res) => {
     }
 });
 
-// 获取问题（仅当类别准备好时）
 router.get('/questions/:category', async (req, res) => {
     try {
         const category = req.params.category.toLowerCase();
         
-        // 检查类别是否准备好
+        
         const config = await Config.findOne();
         const isCategoryReady = config?.categoryStatus?.[category] || false;
         
@@ -95,12 +94,10 @@ router.get('/questions/:category', async (req, res) => {
     }
 });
 
-// 提交测验
 router.post('/submit', async (req, res) => {
     try {
         const { userId, answers } = req.body;
         
-        // 查找用户
         const user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({ 
@@ -109,13 +106,10 @@ router.post('/submit', async (req, res) => {
             });
         }
         
-        // 获取配置
         const config = await Config.findOne();
         
-        // 获取用户类别的问题
         const questions = await Question.find({ category: user.category });
         
-        // 计算分数
         let score = 0;
         let totalMarksObtained = 0;
         let totalPossibleMarks = 0;
@@ -136,11 +130,10 @@ router.post('/submit', async (req, res) => {
             totalPossibleMarks += question.marks || 1;
         }
         
-        // 计算百分比
+        
         const percentage = totalPossibleMarks > 0 ? (totalMarksObtained / totalPossibleMarks) * 100 : 0;
         const passed = percentage >= (config?.passingPercentage || 40);
         
-        // 更新用户结果
         user.score = score;
         user.percentage = percentage;
         user.marksObtained = totalMarksObtained;

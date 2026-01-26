@@ -71,7 +71,6 @@ const Admin = require('../models/Admin');
         try {
             const response = await getResults();
             if (response.data.success) {
-                // Calculate pass/fail status for each result using current config
                 const resultsWithStatus = response.data.results.map(result => {
                     const percentage = parseFloat(result.percentage) || 0;
                     const passed = percentage >= config.passingPercentage;
