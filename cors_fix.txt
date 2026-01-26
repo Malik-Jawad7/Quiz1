@@ -1,0 +1,6 @@
+app.use(cors({
+  origin: ['https://frontend-ikiat7l7p-khalids-projects-3de9ee65.vercel.app', 'http://localhost:3000'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
