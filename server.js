@@ -10,13 +10,18 @@ const app = express();
 
 // ================= CONFIG =================
 const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority&appName=Cluster0";
+const MONGO_URI = process.env.MONGODB_URI;
 const JWT_SECRET = process.env.JWT_SECRET || "shamsi-institute-quiz-secret-key-2024";
 
 // ================= MIDDLEWARE =================
-// Enhanced CORS configuration
+// Fixed CORS configuration
 const corsOptions = {
-  origin: '*', // Allow all origins for now
+  origin: [
+    'https://quiz2-iota-one.vercel.app',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    '*'
+  ],
   credentials: true,
   optionsSuccessStatus: 200,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -39,7 +44,6 @@ const connectDB = async () => {
   try {
     if (mongoose.connection.readyState === 0) {
       console.log('🔄 Attempting to connect to MongoDB...');
-      console.log(`   Using URI: ${MONGO_URI.substring(0, 50)}...`);
       
       await mongoose.connect(MONGO_URI, {
         useNewUrlParser: true,
@@ -54,7 +58,6 @@ const connectDB = async () => {
       console.log("✅ MongoDB Connected Successfully!");
       console.log(`📊 Database: ${mongoose.connection.name}`);
       console.log(`📍 Host: ${mongoose.connection.host}`);
-      console.log(`🔌 Port: ${mongoose.connection.port}`);
       console.log(`📈 Ready State: ${mongoose.connection.readyState}`);
     } else {
       console.log(`📊 Already connected to MongoDB (State: ${mongoose.connection.readyState})`);
@@ -62,16 +65,9 @@ const connectDB = async () => {
     return true;
   } catch (err) {
     console.error("❌ MongoDB connection error:", err.message);
-    console.error("🔧 Error details:", {
-      name: err.name,
-      code: err.code,
-      errorLabels: err.errorLabels
-    });
     
-    // Log the exact connection string (without password) for debugging
-    const safeURI = MONGO_URI.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@');
-    console.log(`🔍 Connection string used: ${safeURI}`);
-    
+    // Use memory mode if MongoDB fails
+    console.log("⚠️ Running in memory mode (database disconnected)");
     return false;
   }
 };
@@ -83,11 +79,11 @@ connectDB().then((success) => {
   if (success) {
     console.log("🚀 Database ready for connections");
   } else {
-    console.log("⚠️ Database connection failed, running in fallback mode");
+    console.log("⚠️ Running in memory mode");
   }
 }).catch(console.error);
 
-// ================= ENHANCED MODELS =================
+// ================= MODELS =================
 const userSchema = new mongoose.Schema({
   name: String,
   rollNumber: { type: String, unique: true },
@@ -148,12 +144,7 @@ let memoryConfig = [{
   totalQuestions: 50,
   maxMarks: 100
 }];
-let memoryAdmins = [{
-  username: 'admin',
-  password: '$2a$10$YourHashedPasswordHere', // admin123
-  name: 'System Administrator',
-  role: 'superadmin'
-}];
+let memoryAdmins = [];
 
 // ================= ADMIN AUTH MIDDLEWARE =================
 const adminAuth = async (req, res, next) => {
@@ -174,7 +165,6 @@ const adminAuth = async (req, res, next) => {
     if (dbConnected) {
       admin = await Admin.findById(decoded.id);
     } else {
-      // Fallback to memory storage
       admin = memoryAdmins.find(a => a.username === decoded.username);
     }
     
@@ -208,7 +198,13 @@ const initializeAdmin = async () => {
     } else {
       // Update memory admin with proper hashed password
       const hashedPassword = await bcrypt.hash("admin123", 10);
-      memoryAdmins[0].password = hashedPassword;
+      memoryAdmins = [{
+        _id: 'admin',
+        username: 'admin',
+        password: hashedPassword,
+        name: 'System Administrator',
+        role: 'superadmin'
+      }];
       console.log("✅ Default admin loaded in memory: admin / admin123");
     }
   } catch (error) {
@@ -273,7 +269,6 @@ const initializeSampleQuestions = async () => {
         console.log(`✅ ${sampleQuestions.length} sample questions created in MongoDB`);
       }
     } else {
-      // Load sample questions to memory
       memoryQuestions = [
         {
           _id: '1',
@@ -423,8 +418,7 @@ app.get("/api/test-db", async (req, res) => {
       success: false,
       message: "Database test failed",
       error: error.message,
-      mode: "Error",
-      mongoURI: MONGO_URI ? "Configured" : "Not configured"
+      mode: "Error"
     });
   }
 });
@@ -790,10 +784,8 @@ app.post("/api/admin/login", async (req, res) => {
 
     let admin;
     if (dbConnected) {
-      // Find admin in MongoDB
       admin = await Admin.findOne({ username });
     } else {
-      // Find admin in memory
       admin = memoryAdmins.find(a => a.username === username);
     }
     
@@ -957,49 +949,33 @@ app.get("/api/admin/users", adminAuth, async (req, res) => {
     let results;
     
     if (dbConnected) {
-      const users = await User.find().sort({ createdAt: -1 });
-      results = users.map(user => ({
-        _id: user._id,
-        name: user.name,
-        rollNumber: user.rollNumber,
-        category: user.category,
-        score: user.score,
-        totalQuestions: user.totalQuestions,
-        percentage: user.percentage,
-        attempted: user.attempted,
-        correct: user.correct,
-        incorrect: user.incorrect,
-        unattempted: user.unattempted,
-        passed: user.passed,
-        timeSpent: user.timeSpent,
-        createdAt: user.createdAt
-      }));
+      results = await User.find().sort({ createdAt: -1 });
     } else {
-      results = memoryUsers
-        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-        .map(user => ({
-          _id: user._id,
-          name: user.name,
-          rollNumber: user.rollNumber,
-          category: user.category,
-          score: user.score,
-          totalQuestions: user.totalQuestions,
-          percentage: user.percentage,
-          attempted: user.attempted,
-          correct: user.correct,
-          incorrect: user.incorrect,
-          unattempted: user.unattempted,
-          passed: user.passed,
-          timeSpent: user.timeSpent,
-          createdAt: user.createdAt
-        }));
+      results = memoryUsers.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     }
+    
+    const formattedResults = results.map(user => ({
+      _id: user._id,
+      name: user.name,
+      rollNumber: user.rollNumber,
+      category: user.category,
+      score: user.score,
+      totalQuestions: user.totalQuestions,
+      percentage: user.percentage,
+      attempted: user.attempted,
+      correct: user.correct,
+      incorrect: user.incorrect,
+      unattempted: user.unattempted,
+      passed: user.passed,
+      timeSpent: user.timeSpent,
+      createdAt: user.createdAt
+    }));
     
     res.json({
       success: true,
       mode: dbConnected ? "Database" : "Memory",
-      results: results,
-      count: results.length
+      results: formattedResults,
+      count: formattedResults.length
     });
   } catch (error) {
     console.error("Results error:", error);
@@ -1019,12 +995,11 @@ app.get("/api/admin/questions", adminAuth, async (req, res) => {
     if (dbConnected) {
       questions = await Question.find().sort({ category: 1, createdAt: -1 });
     } else {
-      questions = memoryQuestions
-        .sort((a, b) => {
-          if (a.category < b.category) return -1;
-          if (a.category > b.category) return 1;
-          return new Date(b.createdAt) - new Date(a.createdAt);
-        });
+      questions = memoryQuestions.sort((a, b) => {
+        if (a.category < b.category) return -1;
+        if (a.category > b.category) return 1;
+        return new Date(b.createdAt) - new Date(a.createdAt);
+      });
     }
     
     res.json({
@@ -1228,6 +1203,8 @@ app.put("/api/admin/questions/:id", adminAuth, async (req, res) => {
 // ✅ Delete Question
 app.delete("/api/admin/questions/:id", adminAuth, async (req, res) => {
   try {
+    const { id } = req.params;
+    
     if (dbConnected) {
       const question = await Question.findByIdAndDelete(id);
       if (!question) {
@@ -1427,6 +1404,9 @@ app.use((req, res) => {
 });
 
 // ================= START SERVER =================
+// Initialize on startup
+initializeAll();
+
 // For Vercel serverless deployment
 export default app;
 
@@ -1434,7 +1414,7 @@ export default app;
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, async () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
-    console.log(`📋 MongoDB URI: ${MONGO_URI ? "Configured" : "Using default"}`);
+    console.log(`📋 MongoDB URI: ${MONGO_URI ? "Configured via .env" : "Not configured"}`);
     console.log(`🔑 JWT Secret: ${JWT_SECRET ? "Configured" : "Using default"}`);
     
     // Initialize database
