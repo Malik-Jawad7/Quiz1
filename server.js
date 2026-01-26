@@ -10,23 +10,13 @@ const app = express();
 
 // ================= CONFIG =================
 const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority";
+const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority&appName=Cluster0";
 const JWT_SECRET = process.env.JWT_SECRET || "shamsi-institute-quiz-secret-key-2024";
 
 // ================= MIDDLEWARE =================
 // Enhanced CORS configuration
 const corsOptions = {
-  origin: [
-    'https://quiz2-iota-one.vercel.app',
-    'https://quiz2-bsil5hk4z-khalids-projects-3de9ee65.vercel.app',
-    'https://shamsi-quiz.vercel.app',
-    'https://shamsi-institute.vercel.app',
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://localhost:5000',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:3000'
-  ],
+  origin: '*', // Allow all origins for now
   credentials: true,
   optionsSuccessStatus: 200,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -41,25 +31,60 @@ app.use(express.urlencoded({ extended: true }));
 app.options('*', cors(corsOptions));
 
 // ================= MONGODB CONNECTION =================
+console.log('🔧 MongoDB Connection Details:');
+console.log(`   URI Configured: ${MONGO_URI ? 'Yes' : 'No'}`);
+console.log(`   NODE_ENV: ${process.env.NODE_ENV}`);
+
 const connectDB = async () => {
   try {
     if (mongoose.connection.readyState === 0) {
+      console.log('🔄 Attempting to connect to MongoDB...');
+      console.log(`   Using URI: ${MONGO_URI.substring(0, 50)}...`);
+      
       await mongoose.connect(MONGO_URI, {
         useNewUrlParser: true,
         useUnifiedTopology: true,
+        serverSelectionTimeoutMS: 30000,
+        socketTimeoutMS: 45000,
+        maxPoolSize: 10,
+        retryWrites: true,
+        w: 'majority'
       });
-      console.log("✅ MongoDB Connected Successfully");
+      
+      console.log("✅ MongoDB Connected Successfully!");
       console.log(`📊 Database: ${mongoose.connection.name}`);
+      console.log(`📍 Host: ${mongoose.connection.host}`);
+      console.log(`🔌 Port: ${mongoose.connection.port}`);
+      console.log(`📈 Ready State: ${mongoose.connection.readyState}`);
+    } else {
+      console.log(`📊 Already connected to MongoDB (State: ${mongoose.connection.readyState})`);
     }
+    return true;
   } catch (err) {
     console.error("❌ MongoDB connection error:", err.message);
-    throw err;
+    console.error("🔧 Error details:", {
+      name: err.name,
+      code: err.code,
+      errorLabels: err.errorLabels
+    });
+    
+    // Log the exact connection string (without password) for debugging
+    const safeURI = MONGO_URI.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@');
+    console.log(`🔍 Connection string used: ${safeURI}`);
+    
+    return false;
   }
 };
 
 // Test connection immediately
-connectDB().then(() => {
-  console.log("🚀 Database ready for connections");
+let dbConnected = false;
+connectDB().then((success) => {
+  dbConnected = success;
+  if (success) {
+    console.log("🚀 Database ready for connections");
+  } else {
+    console.log("⚠️ Database connection failed, running in fallback mode");
+  }
 }).catch(console.error);
 
 // ================= ENHANCED MODELS =================
@@ -114,6 +139,22 @@ const Question = mongoose.model('Question', questionSchema);
 const Admin = mongoose.model('Admin', adminSchema);
 const Config = mongoose.model('Config', configSchema);
 
+// ================= FALLBACK IN-MEMORY STORAGE =================
+let memoryUsers = [];
+let memoryQuestions = [];
+let memoryConfig = [{
+  quizTime: 30,
+  passingPercentage: 40,
+  totalQuestions: 50,
+  maxMarks: 100
+}];
+let memoryAdmins = [{
+  username: 'admin',
+  password: '$2a$10$YourHashedPasswordHere', // admin123
+  name: 'System Administrator',
+  role: 'superadmin'
+}];
+
 // ================= ADMIN AUTH MIDDLEWARE =================
 const adminAuth = async (req, res, next) => {
   try {
@@ -128,7 +169,14 @@ const adminAuth = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, JWT_SECRET);
-    const admin = await Admin.findById(decoded.id);
+    
+    let admin;
+    if (dbConnected) {
+      admin = await Admin.findById(decoded.id);
+    } else {
+      // Fallback to memory storage
+      admin = memoryAdmins.find(a => a.username === decoded.username);
+    }
     
     if (!admin) {
       return res.status(401).json({ success: false, message: "Invalid token" });
@@ -145,16 +193,23 @@ const adminAuth = async (req, res, next) => {
 // ================= INITIALIZE DEFAULT DATA =================
 const initializeAdmin = async () => {
   try {
-    const adminCount = await Admin.countDocuments();
-    if (adminCount === 0) {
+    if (dbConnected) {
+      const adminCount = await Admin.countDocuments();
+      if (adminCount === 0) {
+        const hashedPassword = await bcrypt.hash("admin123", 10);
+        await Admin.create({
+          username: "admin",
+          password: hashedPassword,
+          name: "System Administrator",
+          role: "superadmin"
+        });
+        console.log("✅ Default admin created in MongoDB: admin / admin123");
+      }
+    } else {
+      // Update memory admin with proper hashed password
       const hashedPassword = await bcrypt.hash("admin123", 10);
-      await Admin.create({
-        username: "admin",
-        password: hashedPassword,
-        name: "System Administrator",
-        role: "superadmin"
-      });
-      console.log("✅ Default admin created: admin / admin123");
+      memoryAdmins[0].password = hashedPassword;
+      console.log("✅ Default admin loaded in memory: admin / admin123");
     }
   } catch (error) {
     console.error("❌ Error creating admin:", error);
@@ -163,15 +218,19 @@ const initializeAdmin = async () => {
 
 const initializeConfig = async () => {
   try {
-    const configCount = await Config.countDocuments();
-    if (configCount === 0) {
-      await Config.create({
-        quizTime: 30,
-        passingPercentage: 40,
-        totalQuestions: 50,
-        maxMarks: 100
-      });
-      console.log("✅ Default configuration created");
+    if (dbConnected) {
+      const configCount = await Config.countDocuments();
+      if (configCount === 0) {
+        await Config.create({
+          quizTime: 30,
+          passingPercentage: 40,
+          totalQuestions: 50,
+          maxMarks: 100
+        });
+        console.log("✅ Default configuration created in MongoDB");
+      }
+    } else {
+      console.log("✅ Default configuration loaded in memory");
     }
   } catch (error) {
     console.error("❌ Error creating config:", error);
@@ -180,10 +239,44 @@ const initializeConfig = async () => {
 
 const initializeSampleQuestions = async () => {
   try {
-    const questionCount = await Question.countDocuments();
-    if (questionCount === 0) {
-      const sampleQuestions = [
+    if (dbConnected) {
+      const questionCount = await Question.countDocuments();
+      if (questionCount === 0) {
+        const sampleQuestions = [
+          {
+            category: "mern",
+            questionText: "What does MERN stand for?",
+            difficulty: "easy",
+            options: [
+              { text: "MongoDB, Express, React, Node.js", isCorrect: true, optionIndex: 1 },
+              { text: "MySQL, Express, Ruby, .NET", isCorrect: false, optionIndex: 2 },
+              { text: "MongoDB, Angular, React, Node.js", isCorrect: false, optionIndex: 3 },
+              { text: "MySQL, Express, React, Node.js", isCorrect: false, optionIndex: 4 }
+            ],
+            marks: 2
+          },
+          {
+            category: "react",
+            questionText: "What is React?",
+            difficulty: "easy",
+            options: [
+              { text: "A JavaScript library for building user interfaces", isCorrect: true, optionIndex: 1 },
+              { text: "A programming language", isCorrect: false, optionIndex: 2 },
+              { text: "A database management system", isCorrect: false, optionIndex: 3 },
+              { text: "A CSS framework", isCorrect: false, optionIndex: 4 }
+            ],
+            marks: 1
+          }
+        ];
+        
+        await Question.insertMany(sampleQuestions);
+        console.log(`✅ ${sampleQuestions.length} sample questions created in MongoDB`);
+      }
+    } else {
+      // Load sample questions to memory
+      memoryQuestions = [
         {
+          _id: '1',
           category: "mern",
           questionText: "What does MERN stand for?",
           difficulty: "easy",
@@ -194,59 +287,9 @@ const initializeSampleQuestions = async () => {
             { text: "MySQL, Express, React, Node.js", isCorrect: false, optionIndex: 4 }
           ],
           marks: 2
-        },
-        {
-          category: "react",
-          questionText: "What is React?",
-          difficulty: "easy",
-          options: [
-            { text: "A JavaScript library for building user interfaces", isCorrect: true, optionIndex: 1 },
-            { text: "A programming language", isCorrect: false, optionIndex: 2 },
-            { text: "A database management system", isCorrect: false, optionIndex: 3 },
-            { text: "A CSS framework", isCorrect: false, optionIndex: 4 }
-          ],
-          marks: 1
-        },
-        {
-          category: "node",
-          questionText: "Node.js is built on which engine?",
-          difficulty: "medium",
-          options: [
-            { text: "V8 JavaScript Engine", isCorrect: true, optionIndex: 1 },
-            { text: "SpiderMonkey", isCorrect: false, optionIndex: 2 },
-            { text: "Chakra", isCorrect: false, optionIndex: 3 },
-            { text: "JavaScriptCore", isCorrect: false, optionIndex: 4 }
-          ],
-          marks: 1
-        },
-        {
-          category: "mongodb",
-          questionText: "MongoDB is a ____ database?",
-          difficulty: "medium",
-          options: [
-            { text: "NoSQL", isCorrect: true, optionIndex: 1 },
-            { text: "SQL", isCorrect: false, optionIndex: 2 },
-            { text: "Graph", isCorrect: false, optionIndex: 3 },
-            { text: "Key-Value", isCorrect: false, optionIndex: 4 }
-          ],
-          marks: 1
-        },
-        {
-          category: "express",
-          questionText: "Express.js is a framework for?",
-          difficulty: "easy",
-          options: [
-            { text: "Node.js", isCorrect: true, optionIndex: 1 },
-            { text: "React", isCorrect: false, optionIndex: 2 },
-            { text: "Python", isCorrect: false, optionIndex: 3 },
-            { text: "Java", isCorrect: false, optionIndex: 4 }
-          ],
-          marks: 1
         }
       ];
-      
-      await Question.insertMany(sampleQuestions);
-      console.log(`✅ ${sampleQuestions.length} sample questions created`);
+      console.log("✅ Sample questions loaded in memory");
     }
   } catch (error) {
     console.error("❌ Error creating sample questions:", error);
@@ -274,6 +317,7 @@ app.get("/", (req, res) => {
     status: "OK",
     timestamp: new Date().toISOString(),
     version: "2.0.0",
+    database: dbConnected ? "Connected" : "Disconnected (Memory Mode)",
     endpoints: {
       public: [
         "/api/health",
@@ -293,20 +337,34 @@ app.get("/", (req, res) => {
   });
 });
 
-// ✅ Health check
+// ✅ Enhanced Health check
 app.get("/api/health", async (req, res) => {
   try {
-    await connectDB();
-    const dbStatus = mongoose.connection.readyState === 1 ? "Connected" : "Disconnected";
+    const dbStatus = dbConnected ? "Connected" : "Disconnected";
+    
+    let userCount = 0;
+    let questionCount = 0;
+    
+    if (dbConnected) {
+      userCount = await User.countDocuments();
+      questionCount = await Question.countDocuments();
+    } else {
+      userCount = memoryUsers.length;
+      questionCount = memoryQuestions.length;
+    }
     
     res.json({
       success: true,
-      message: "Server is healthy and running",
+      message: `Server is healthy and running in ${dbConnected ? 'Database' : 'Memory'} mode`,
       database: dbStatus,
       environment: process.env.NODE_ENV || "development",
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
-      memory: process.memoryUsage(),
+      counts: {
+        users: userCount,
+        questions: questionCount
+      },
+      readyState: mongoose.connection.readyState,
       url: req.protocol + '://' + req.get('host')
     });
   } catch (error) {
@@ -321,31 +379,51 @@ app.get("/api/health", async (req, res) => {
 // ✅ Test MongoDB connection
 app.get("/api/test-db", async (req, res) => {
   try {
-    await connectDB();
-    const users = await User.countDocuments();
-    const questions = await Question.countDocuments();
-    const admins = await Admin.countDocuments();
+    const isConnected = dbConnected;
     
-    res.json({
-      success: true,
-      message: "Database test successful",
-      counts: {
-        users: users,
-        questions: questions,
-        admins: admins
-      },
-      connection: {
-        host: mongoose.connection.host,
-        port: mongoose.connection.port,
-        name: mongoose.connection.name,
-        readyState: mongoose.connection.readyState
-      }
-    });
+    if (isConnected) {
+      const users = await User.countDocuments();
+      const questions = await Question.countDocuments();
+      const admins = await Admin.countDocuments();
+      
+      res.json({
+        success: true,
+        message: "Database test successful",
+        mode: "MongoDB",
+        counts: {
+          users: users,
+          questions: questions,
+          admins: admins
+        },
+        connection: {
+          host: mongoose.connection.host,
+          port: mongoose.connection.port,
+          name: mongoose.connection.name,
+          readyState: mongoose.connection.readyState
+        }
+      });
+    } else {
+      res.json({
+        success: true,
+        message: "Running in memory mode",
+        mode: "Memory",
+        counts: {
+          users: memoryUsers.length,
+          questions: memoryQuestions.length,
+          admins: memoryAdmins.length
+        },
+        connection: {
+          readyState: 0,
+          status: "Using in-memory storage"
+        }
+      });
+    }
   } catch (error) {
     res.status(500).json({
       success: false,
       message: "Database test failed",
       error: error.message,
+      mode: "Error",
       mongoURI: MONGO_URI ? "Configured" : "Not configured"
     });
   }
@@ -354,16 +432,20 @@ app.get("/api/test-db", async (req, res) => {
 // ✅ GET Configuration
 app.get("/api/config", async (req, res) => {
   try {
-    await connectDB();
-    let config = await Config.findOne();
+    let config;
     
-    if (!config) {
-      config = await Config.create({
-        quizTime: 30,
-        passingPercentage: 40,
-        totalQuestions: 50,
-        maxMarks: 100
-      });
+    if (dbConnected) {
+      config = await Config.findOne();
+      if (!config) {
+        config = await Config.create({
+          quizTime: 30,
+          passingPercentage: 40,
+          totalQuestions: 50,
+          maxMarks: 100
+        });
+      }
+    } else {
+      config = memoryConfig[0];
     }
     
     res.json({
@@ -388,22 +470,16 @@ app.get("/api/config", async (req, res) => {
 // ✅ Initialize Database with Sample Data
 app.get("/api/init", async (req, res) => {
   try {
-    await connectDB();
-    
-    // Clear existing data (optional)
-    // await User.deleteMany({});
-    // await Question.deleteMany({});
-    
     await initializeAll();
     
     res.json({
       success: true,
       message: "Database initialized successfully",
       data: {
-        users: await User.countDocuments(),
-        questions: await Question.countDocuments(),
-        admins: await Admin.countDocuments(),
-        config: await Config.findOne()
+        users: dbConnected ? await User.countDocuments() : memoryUsers.length,
+        questions: dbConnected ? await Question.countDocuments() : memoryQuestions.length,
+        admins: dbConnected ? await Admin.countDocuments() : memoryAdmins.length,
+        config: dbConnected ? await Config.findOne() : memoryConfig[0]
       }
     });
   } catch (error) {
@@ -421,8 +497,6 @@ app.get("/api/init", async (req, res) => {
 // ✅ POST Registration
 app.post("/api/auth/register", async (req, res) => {
   try {
-    await connectDB();
-    
     const { name, rollNumber, category } = req.body;
     
     if (!name || !rollNumber || !category) {
@@ -432,38 +506,68 @@ app.post("/api/auth/register", async (req, res) => {
       });
     }
 
-    // Check if user exists
-    const existing = await User.findOne({ rollNumber });
-    if (existing) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Roll number already exists" 
+    if (dbConnected) {
+      // Check if user exists
+      const existing = await User.findOne({ rollNumber });
+      if (existing) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "Roll number already exists" 
+        });
+      }
+
+      const user = new User({
+        name,
+        rollNumber,
+        category: category.toLowerCase(),
+        score: 0,
+        percentage: 0,
+        passed: false,
+        createdAt: new Date()
+      });
+
+      await user.save();
+
+      res.json({ 
+        success: true, 
+        message: "Registration successful",
+        user: {
+          id: user._id,
+          name: user.name,
+          rollNumber: user.rollNumber,
+          category: user.category,
+          createdAt: user.createdAt
+        }
+      });
+    } else {
+      // Memory storage
+      const existing = memoryUsers.find(u => u.rollNumber === rollNumber);
+      if (existing) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "Roll number already exists" 
+        });
+      }
+
+      const newUser = {
+        _id: Date.now().toString(),
+        name,
+        rollNumber,
+        category: category.toLowerCase(),
+        score: 0,
+        percentage: 0,
+        passed: false,
+        createdAt: new Date()
+      };
+      
+      memoryUsers.push(newUser);
+
+      res.json({ 
+        success: true, 
+        message: "Registration successful (Memory Mode)",
+        user: newUser
       });
     }
-
-    const user = new User({
-      name,
-      rollNumber,
-      category: category.toLowerCase(),
-      score: 0,
-      percentage: 0,
-      passed: false,
-      createdAt: new Date()
-    });
-
-    await user.save();
-
-    res.json({ 
-      success: true, 
-      message: "Registration successful",
-      user: {
-        id: user._id,
-        name: user.name,
-        rollNumber: user.rollNumber,
-        category: user.category,
-        createdAt: user.createdAt
-      }
-    });
   } catch (error) {
     console.error("Registration error:", error);
     res.status(500).json({ 
@@ -477,12 +581,19 @@ app.post("/api/auth/register", async (req, res) => {
 // ✅ Get Questions by Category
 app.get("/api/user/questions/:category", async (req, res) => {
   try {
-    await connectDB();
-    
     const category = req.params.category.toLowerCase();
-    const config = await Config.findOne() || { totalQuestions: 50 };
     
-    let questions = await Question.find({ category });
+    let questions = [];
+    let totalQuestions = 50;
+    
+    if (dbConnected) {
+      const config = await Config.findOne() || { totalQuestions: 50 };
+      totalQuestions = config.totalQuestions;
+      questions = await Question.find({ category });
+    } else {
+      totalQuestions = memoryConfig[0].totalQuestions;
+      questions = memoryQuestions.filter(q => q.category === category);
+    }
     
     if (questions.length === 0) {
       return res.status(404).json({ 
@@ -495,8 +606,8 @@ app.get("/api/user/questions/:category", async (req, res) => {
     questions = questions.sort(() => Math.random() - 0.5);
     
     // Limit questions based on config
-    if (questions.length > config.totalQuestions) {
-      questions = questions.slice(0, config.totalQuestions);
+    if (questions.length > totalQuestions) {
+      questions = questions.slice(0, totalQuestions);
     }
 
     // Return questions without correct answers
@@ -517,7 +628,8 @@ app.get("/api/user/questions/:category", async (req, res) => {
       questions: safeQuestions,
       count: safeQuestions.length,
       category: category,
-      totalQuestions: config.totalQuestions
+      totalQuestions: totalQuestions,
+      mode: dbConnected ? "Database" : "Memory"
     });
   } catch (error) {
     console.error("Questions error:", error);
@@ -532,8 +644,6 @@ app.get("/api/user/questions/:category", async (req, res) => {
 // ✅ Submit Quiz
 app.post("/api/user/submit", async (req, res) => {
   try {
-    await connectDB();
-    
     const { userId, userName, rollNumber, category, answers, score, totalQuestions, timeSpent } = req.body;
     
     if (!userName || !rollNumber || !category) {
@@ -543,17 +653,12 @@ app.post("/api/user/submit", async (req, res) => {
       });
     }
 
-    // Find or create user
-    let user = await User.findOne({ rollNumber });
-    if (!user) {
-      user = new User({
-        name: userName,
-        rollNumber: rollNumber,
-        category: category.toLowerCase()
-      });
+    let config;
+    if (dbConnected) {
+      config = await Config.findOne() || { passingPercentage: 40 };
+    } else {
+      config = memoryConfig[0];
     }
-
-    const config = await Config.findOne() || { passingPercentage: 40 };
     
     // Calculate results
     const calculatedScore = score || 0;
@@ -565,43 +670,100 @@ app.post("/api/user/submit", async (req, res) => {
     const attempted = answers?.length || 0;
     const unattempted = calculatedTotalQuestions - attempted;
     
-    // Update user
-    user.name = userName;
-    user.category = category.toLowerCase();
-    user.score = calculatedScore;
-    user.totalQuestions = calculatedTotalQuestions;
-    user.percentage = calculatedPercentage;
-    user.passed = isPassed;
-    user.attempted = attempted;
-    user.correct = correctAnswers;
-    user.incorrect = incorrectAnswers;
-    user.unattempted = unattempted;
-    user.timeSpent = timeSpent || 0;
-    user.answers = answers || [];
-    
-    await user.save();
-
-    res.json({
-      success: true,
-      message: isPassed ? "Congratulations! You passed." : "Try again to improve your score.",
-      result: {
-        userId: user._id,
-        userName: user.name,
-        rollNumber: user.rollNumber,
-        category: user.category,
-        score: user.score,
-        totalQuestions: user.totalQuestions,
-        percentage: user.percentage.toFixed(2),
-        passed: user.passed,
-        passingPercentage: config.passingPercentage,
-        attempted: user.attempted,
-        correct: user.correct,
-        incorrect: user.incorrect,
-        unattempted: user.unattempted,
-        timeSpent: user.timeSpent,
-        createdAt: user.createdAt
+    if (dbConnected) {
+      // Find or create user
+      let user = await User.findOne({ rollNumber });
+      if (!user) {
+        user = new User({
+          name: userName,
+          rollNumber: rollNumber,
+          category: category.toLowerCase()
+        });
       }
-    });
+
+      // Update user
+      user.name = userName;
+      user.category = category.toLowerCase();
+      user.score = calculatedScore;
+      user.totalQuestions = calculatedTotalQuestions;
+      user.percentage = calculatedPercentage;
+      user.passed = isPassed;
+      user.attempted = attempted;
+      user.correct = correctAnswers;
+      user.incorrect = incorrectAnswers;
+      user.unattempted = unattempted;
+      user.timeSpent = timeSpent || 0;
+      user.answers = answers || [];
+      
+      await user.save();
+
+      res.json({
+        success: true,
+        message: isPassed ? "Congratulations! You passed." : "Try again to improve your score.",
+        result: {
+          userId: user._id,
+          userName: user.name,
+          rollNumber: user.rollNumber,
+          category: user.category,
+          score: user.score,
+          totalQuestions: user.totalQuestions,
+          percentage: user.percentage.toFixed(2),
+          passed: user.passed,
+          passingPercentage: config.passingPercentage,
+          attempted: user.attempted,
+          correct: user.correct,
+          incorrect: user.incorrect,
+          unattempted: user.unattempted,
+          timeSpent: user.timeSpent,
+          createdAt: user.createdAt
+        }
+      });
+    } else {
+      // Memory storage
+      let user = memoryUsers.find(u => u.rollNumber === rollNumber);
+      if (!user) {
+        user = {
+          _id: Date.now().toString(),
+          name: userName,
+          rollNumber: rollNumber,
+          category: category.toLowerCase(),
+          score: calculatedScore,
+          totalQuestions: calculatedTotalQuestions,
+          percentage: calculatedPercentage,
+          passed: isPassed,
+          attempted: attempted,
+          correct: correctAnswers,
+          incorrect: incorrectAnswers,
+          unattempted: unattempted,
+          timeSpent: timeSpent || 0,
+          answers: answers || [],
+          createdAt: new Date()
+        };
+        memoryUsers.push(user);
+      } else {
+        Object.assign(user, {
+          name: userName,
+          category: category.toLowerCase(),
+          score: calculatedScore,
+          totalQuestions: calculatedTotalQuestions,
+          percentage: calculatedPercentage,
+          passed: isPassed,
+          attempted: attempted,
+          correct: correctAnswers,
+          incorrect: incorrectAnswers,
+          unattempted: unattempted,
+          timeSpent: timeSpent || 0,
+          answers: answers || [],
+          updatedAt: new Date()
+        });
+      }
+
+      res.json({
+        success: true,
+        message: isPassed ? "Congratulations! You passed (Memory Mode)." : "Try again to improve your score.",
+        result: user
+      });
+    }
   } catch (error) {
     console.error("Submit error:", error);
     res.status(500).json({ 
@@ -617,8 +779,6 @@ app.post("/api/user/submit", async (req, res) => {
 // ✅ Admin Login
 app.post("/api/admin/login", async (req, res) => {
   try {
-    await connectDB();
-    
     const { username, password } = req.body;
     
     if (!username || !password) {
@@ -628,8 +788,15 @@ app.post("/api/admin/login", async (req, res) => {
       });
     }
 
-    // Find admin
-    const admin = await Admin.findOne({ username });
+    let admin;
+    if (dbConnected) {
+      // Find admin in MongoDB
+      admin = await Admin.findOne({ username });
+    } else {
+      // Find admin in memory
+      admin = memoryAdmins.find(a => a.username === username);
+    }
+    
     if (!admin) {
       return res.status(401).json({ 
         success: false, 
@@ -649,7 +816,7 @@ app.post("/api/admin/login", async (req, res) => {
     // Create token
     const token = jwt.sign(
       { 
-        id: admin._id, 
+        id: admin._id || admin.username,
         username: admin.username,
         role: admin.role 
       }, 
@@ -662,10 +829,11 @@ app.post("/api/admin/login", async (req, res) => {
       message: "Login successful",
       token: token,
       user: {
-        id: admin._id,
+        id: admin._id || admin.username,
         username: admin.username,
         name: admin.name,
-        role: admin.role
+        role: admin.role,
+        mode: dbConnected ? "Database" : "Memory"
       }
     });
   } catch (error) {
@@ -681,14 +849,61 @@ app.post("/api/admin/login", async (req, res) => {
 // ✅ Get Dashboard Stats
 app.get("/api/admin/dashboard", adminAuth, async (req, res) => {
   try {
-    await connectDB();
+    let totalStudents, totalQuestions, totalAttempts, users, categories, recentResults;
+    let categoryStats = {};
     
-    const totalStudents = await User.countDocuments();
-    const totalQuestions = await Question.countDocuments();
-    const totalAttempts = await User.countDocuments({ attempted: { $gt: 0 } });
+    if (dbConnected) {
+      totalStudents = await User.countDocuments();
+      totalQuestions = await Question.countDocuments();
+      totalAttempts = await User.countDocuments({ attempted: { $gt: 0 } });
+      users = await User.find({ attempted: { $gt: 0 } });
+      categories = await Question.distinct('category');
+      
+      // Category statistics
+      for (const category of categories) {
+        const questions = await Question.countDocuments({ category });
+        const results = await User.countDocuments({ category, attempted: { $gt: 0 } });
+        const passed = await User.countDocuments({ category, passed: true });
+        categoryStats[category] = { questions, results, passed };
+      }
+      
+      // Recent activity
+      recentResults = await User.find({ attempted: { $gt: 0 } })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .select('name rollNumber category score percentage passed createdAt');
+    } else {
+      totalStudents = memoryUsers.length;
+      totalQuestions = memoryQuestions.length;
+      totalAttempts = memoryUsers.filter(u => u.attempted > 0).length;
+      users = memoryUsers.filter(u => u.attempted > 0);
+      categories = [...new Set(memoryQuestions.map(q => q.category))];
+      
+      // Category statistics
+      for (const category of categories) {
+        const questions = memoryQuestions.filter(q => q.category === category).length;
+        const results = memoryUsers.filter(u => u.category === category && u.attempted > 0).length;
+        const passed = memoryUsers.filter(u => u.category === category && u.passed).length;
+        categoryStats[category] = { questions, results, passed };
+      }
+      
+      // Recent activity
+      recentResults = memoryUsers
+        .filter(u => u.attempted > 0)
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .slice(0, 5)
+        .map(u => ({
+          name: u.name,
+          rollNumber: u.rollNumber,
+          category: u.category,
+          score: u.score,
+          percentage: u.percentage,
+          passed: u.passed,
+          createdAt: u.createdAt
+        }));
+    }
     
     // Calculate average score and pass rate
-    const users = await User.find({ attempted: { $gt: 0 } });
     const totalScore = users.reduce((sum, user) => sum + (user.percentage || 0), 0);
     const passedStudents = users.filter(user => user.passed).length;
     
@@ -698,31 +913,22 @@ app.get("/api/admin/dashboard", adminAuth, async (req, res) => {
     // Today's attempts
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todayAttempts = await User.countDocuments({ 
-      createdAt: { $gte: today },
-      attempted: { $gt: 0 }
-    });
+    let todayAttempts = 0;
     
-    // Get unique categories
-    const categories = await Question.distinct('category');
-    
-    // Category statistics
-    const categoryStats = {};
-    for (const category of categories) {
-      const questions = await Question.countDocuments({ category });
-      const results = await User.countDocuments({ category, attempted: { $gt: 0 } });
-      const passed = await User.countDocuments({ category, passed: true });
-      categoryStats[category] = { questions, results, passed };
+    if (dbConnected) {
+      todayAttempts = await User.countDocuments({ 
+        createdAt: { $gte: today },
+        attempted: { $gt: 0 }
+      });
+    } else {
+      todayAttempts = memoryUsers.filter(u => 
+        new Date(u.createdAt) >= today && u.attempted > 0
+      ).length;
     }
-    
-    // Recent activity
-    const recentResults = await User.find({ attempted: { $gt: 0 } })
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .select('name rollNumber category score percentage passed createdAt');
     
     res.json({
       success: true,
+      mode: dbConnected ? "Database" : "Memory",
       stats: {
         totalStudents,
         totalQuestions,
@@ -748,29 +954,50 @@ app.get("/api/admin/dashboard", adminAuth, async (req, res) => {
 // ✅ Get All Results
 app.get("/api/admin/users", adminAuth, async (req, res) => {
   try {
-    await connectDB();
+    let results;
     
-    const users = await User.find().sort({ createdAt: -1 });
-    
-    const results = users.map(user => ({
-      _id: user._id,
-      name: user.name,
-      rollNumber: user.rollNumber,
-      category: user.category,
-      score: user.score,
-      totalQuestions: user.totalQuestions,
-      percentage: user.percentage,
-      attempted: user.attempted,
-      correct: user.correct,
-      incorrect: user.incorrect,
-      unattempted: user.unattempted,
-      passed: user.passed,
-      timeSpent: user.timeSpent,
-      createdAt: user.createdAt
-    }));
+    if (dbConnected) {
+      const users = await User.find().sort({ createdAt: -1 });
+      results = users.map(user => ({
+        _id: user._id,
+        name: user.name,
+        rollNumber: user.rollNumber,
+        category: user.category,
+        score: user.score,
+        totalQuestions: user.totalQuestions,
+        percentage: user.percentage,
+        attempted: user.attempted,
+        correct: user.correct,
+        incorrect: user.incorrect,
+        unattempted: user.unattempted,
+        passed: user.passed,
+        timeSpent: user.timeSpent,
+        createdAt: user.createdAt
+      }));
+    } else {
+      results = memoryUsers
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .map(user => ({
+          _id: user._id,
+          name: user.name,
+          rollNumber: user.rollNumber,
+          category: user.category,
+          score: user.score,
+          totalQuestions: user.totalQuestions,
+          percentage: user.percentage,
+          attempted: user.attempted,
+          correct: user.correct,
+          incorrect: user.incorrect,
+          unattempted: user.unattempted,
+          passed: user.passed,
+          timeSpent: user.timeSpent,
+          createdAt: user.createdAt
+        }));
+    }
     
     res.json({
       success: true,
+      mode: dbConnected ? "Database" : "Memory",
       results: results,
       count: results.length
     });
@@ -787,12 +1014,22 @@ app.get("/api/admin/users", adminAuth, async (req, res) => {
 // ✅ Get All Questions (Admin)
 app.get("/api/admin/questions", adminAuth, async (req, res) => {
   try {
-    await connectDB();
+    let questions;
     
-    const questions = await Question.find().sort({ category: 1, createdAt: -1 });
+    if (dbConnected) {
+      questions = await Question.find().sort({ category: 1, createdAt: -1 });
+    } else {
+      questions = memoryQuestions
+        .sort((a, b) => {
+          if (a.category < b.category) return -1;
+          if (a.category > b.category) return 1;
+          return new Date(b.createdAt) - new Date(a.createdAt);
+        });
+    }
     
     res.json({
       success: true,
+      mode: dbConnected ? "Database" : "Memory",
       questions: questions,
       count: questions.length
     });
@@ -809,8 +1046,6 @@ app.get("/api/admin/questions", adminAuth, async (req, res) => {
 // ✅ Add Question
 app.post("/api/admin/questions", adminAuth, async (req, res) => {
   try {
-    await connectDB();
-    
     const { category, questionText, difficulty, marks, options } = req.body;
     
     if (!category || !questionText || !options || !Array.isArray(options)) {
@@ -830,7 +1065,13 @@ app.post("/api/admin/questions", adminAuth, async (req, res) => {
     }
 
     // Check if marks exceed maximum
-    const config = await Config.findOne();
+    let config;
+    if (dbConnected) {
+      config = await Config.findOne();
+    } else {
+      config = memoryConfig[0];
+    }
+    
     const maxMarks = config?.maxMarks || 100;
     if (marks > maxMarks) {
       return res.status(400).json({ 
@@ -839,24 +1080,47 @@ app.post("/api/admin/questions", adminAuth, async (req, res) => {
       });
     }
 
-    const question = new Question({
-      category: category.toLowerCase(),
-      questionText,
-      difficulty: difficulty || 'medium',
-      marks: marks || 1,
-      options: options.map((opt, index) => ({
-        ...opt,
-        optionIndex: index + 1
-      }))
-    });
+    if (dbConnected) {
+      const question = new Question({
+        category: category.toLowerCase(),
+        questionText,
+        difficulty: difficulty || 'medium',
+        marks: marks || 1,
+        options: options.map((opt, index) => ({
+          ...opt,
+          optionIndex: index + 1
+        }))
+      });
 
-    await question.save();
+      await question.save();
 
-    res.json({
-      success: true,
-      message: "Question added successfully",
-      question: question
-    });
+      res.json({
+        success: true,
+        message: "Question added successfully",
+        question: question
+      });
+    } else {
+      const newQuestion = {
+        _id: Date.now().toString(),
+        category: category.toLowerCase(),
+        questionText,
+        difficulty: difficulty || 'medium',
+        marks: marks || 1,
+        options: options.map((opt, index) => ({
+          ...opt,
+          optionIndex: index + 1
+        })),
+        createdAt: new Date()
+      };
+      
+      memoryQuestions.push(newQuestion);
+
+      res.json({
+        success: true,
+        message: "Question added successfully (Memory Mode)",
+        question: newQuestion
+      });
+    }
   } catch (error) {
     console.error("Add question error:", error);
     res.status(500).json({ 
@@ -870,49 +1134,87 @@ app.post("/api/admin/questions", adminAuth, async (req, res) => {
 // ✅ Update Question
 app.put("/api/admin/questions/:id", adminAuth, async (req, res) => {
   try {
-    await connectDB();
-    
     const { id } = req.params;
     const { category, questionText, difficulty, marks, options } = req.body;
     
-    const question = await Question.findById(id);
-    if (!question) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Question not found" 
-      });
-    }
-
-    // Validate that at least one option is correct
-    if (options && Array.isArray(options)) {
-      const hasCorrectAnswer = options.some(opt => opt.isCorrect);
-      if (!hasCorrectAnswer) {
-        return res.status(400).json({ 
+    if (dbConnected) {
+      const question = await Question.findById(id);
+      if (!question) {
+        return res.status(404).json({ 
           success: false, 
-          message: "At least one option must be correct" 
+          message: "Question not found" 
         });
       }
+
+      // Validate that at least one option is correct
+      if (options && Array.isArray(options)) {
+        const hasCorrectAnswer = options.some(opt => opt.isCorrect);
+        if (!hasCorrectAnswer) {
+          return res.status(400).json({ 
+            success: false, 
+            message: "At least one option must be correct" 
+          });
+        }
+      }
+
+      // Update fields
+      if (category) question.category = category.toLowerCase();
+      if (questionText) question.questionText = questionText;
+      if (difficulty) question.difficulty = difficulty;
+      if (marks) question.marks = marks;
+      if (options) {
+        question.options = options.map((opt, index) => ({
+          ...opt,
+          optionIndex: index + 1
+        }));
+      }
+
+      await question.save();
+
+      res.json({
+        success: true,
+        message: "Question updated successfully",
+        question: question
+      });
+    } else {
+      const questionIndex = memoryQuestions.findIndex(q => q._id === id);
+      if (questionIndex === -1) {
+        return res.status(404).json({ 
+          success: false, 
+          message: "Question not found" 
+        });
+      }
+
+      // Validate that at least one option is correct
+      if (options && Array.isArray(options)) {
+        const hasCorrectAnswer = options.some(opt => opt.isCorrect);
+        if (!hasCorrectAnswer) {
+          return res.status(400).json({ 
+            success: false, 
+            message: "At least one option must be correct" 
+          });
+        }
+      }
+
+      // Update fields
+      const question = memoryQuestions[questionIndex];
+      if (category) question.category = category.toLowerCase();
+      if (questionText) question.questionText = questionText;
+      if (difficulty) question.difficulty = difficulty;
+      if (marks) question.marks = marks;
+      if (options) {
+        question.options = options.map((opt, index) => ({
+          ...opt,
+          optionIndex: index + 1
+        }));
+      }
+
+      res.json({
+        success: true,
+        message: "Question updated successfully (Memory Mode)",
+        question: question
+      });
     }
-
-    // Update fields
-    if (category) question.category = category.toLowerCase();
-    if (questionText) question.questionText = questionText;
-    if (difficulty) question.difficulty = difficulty;
-    if (marks) question.marks = marks;
-    if (options) {
-      question.options = options.map((opt, index) => ({
-        ...opt,
-        optionIndex: index + 1
-      }));
-    }
-
-    await question.save();
-
-    res.json({
-      success: true,
-      message: "Question updated successfully",
-      question: question
-    });
   } catch (error) {
     console.error("Update question error:", error);
     res.status(500).json({ 
@@ -926,22 +1228,35 @@ app.put("/api/admin/questions/:id", adminAuth, async (req, res) => {
 // ✅ Delete Question
 app.delete("/api/admin/questions/:id", adminAuth, async (req, res) => {
   try {
-    await connectDB();
-    
-    const { id } = req.params;
-    
-    const question = await Question.findByIdAndDelete(id);
-    if (!question) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Question not found" 
+    if (dbConnected) {
+      const question = await Question.findByIdAndDelete(id);
+      if (!question) {
+        return res.status(404).json({ 
+          success: false, 
+          message: "Question not found" 
+        });
+      }
+
+      res.json({
+        success: true,
+        message: "Question deleted successfully"
+      });
+    } else {
+      const initialLength = memoryQuestions.length;
+      memoryQuestions = memoryQuestions.filter(q => q._id !== id);
+      
+      if (memoryQuestions.length === initialLength) {
+        return res.status(404).json({ 
+          success: false, 
+          message: "Question not found" 
+        });
+      }
+
+      res.json({
+        success: true,
+        message: "Question deleted successfully (Memory Mode)"
       });
     }
-
-    res.json({
-      success: true,
-      message: "Question deleted successfully"
-    });
   } catch (error) {
     console.error("Delete question error:", error);
     res.status(500).json({ 
@@ -955,38 +1270,51 @@ app.delete("/api/admin/questions/:id", adminAuth, async (req, res) => {
 // ✅ Update Configuration
 app.put("/api/admin/config", adminAuth, async (req, res) => {
   try {
-    await connectDB();
-    
     const { quizTime, passingPercentage, totalQuestions, maxMarks } = req.body;
     
-    let config = await Config.findOne();
-    if (!config) {
-      config = new Config({
-        quizTime: 30,
-        passingPercentage: 40,
-        totalQuestions: 50,
-        maxMarks: 100
+    if (dbConnected) {
+      let config = await Config.findOne();
+      if (!config) {
+        config = new Config({
+          quizTime: 30,
+          passingPercentage: 40,
+          totalQuestions: 50,
+          maxMarks: 100
+        });
+      }
+      
+      if (quizTime !== undefined) config.quizTime = quizTime;
+      if (passingPercentage !== undefined) config.passingPercentage = passingPercentage;
+      if (totalQuestions !== undefined) config.totalQuestions = totalQuestions;
+      if (maxMarks !== undefined) config.maxMarks = maxMarks;
+      
+      config.updatedAt = new Date();
+      await config.save();
+      
+      res.json({
+        success: true,
+        message: "Configuration updated successfully",
+        config: {
+          quizTime: config.quizTime,
+          passingPercentage: config.passingPercentage,
+          totalQuestions: config.totalQuestions,
+          maxMarks: config.maxMarks
+        }
+      });
+    } else {
+      const config = memoryConfig[0];
+      
+      if (quizTime !== undefined) config.quizTime = quizTime;
+      if (passingPercentage !== undefined) config.passingPercentage = passingPercentage;
+      if (totalQuestions !== undefined) config.totalQuestions = totalQuestions;
+      if (maxMarks !== undefined) config.maxMarks = maxMarks;
+      
+      res.json({
+        success: true,
+        message: "Configuration updated successfully (Memory Mode)",
+        config: config
       });
     }
-    
-    if (quizTime !== undefined) config.quizTime = quizTime;
-    if (passingPercentage !== undefined) config.passingPercentage = passingPercentage;
-    if (totalQuestions !== undefined) config.totalQuestions = totalQuestions;
-    if (maxMarks !== undefined) config.maxMarks = maxMarks;
-    
-    config.updatedAt = new Date();
-    await config.save();
-    
-    res.json({
-      success: true,
-      message: "Configuration updated successfully",
-      config: {
-        quizTime: config.quizTime,
-        passingPercentage: config.passingPercentage,
-        totalQuestions: config.totalQuestions,
-        maxMarks: config.maxMarks
-      }
-    });
   } catch (error) {
     console.error("Update config error:", error);
     res.status(500).json({ 
@@ -1000,22 +1328,37 @@ app.put("/api/admin/config", adminAuth, async (req, res) => {
 // ✅ Delete Result
 app.delete("/api/admin/results/:id", adminAuth, async (req, res) => {
   try {
-    await connectDB();
-    
     const { id } = req.params;
     
-    const user = await User.findByIdAndDelete(id);
-    if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Result not found" 
+    if (dbConnected) {
+      const user = await User.findByIdAndDelete(id);
+      if (!user) {
+        return res.status(404).json({ 
+          success: false, 
+          message: "Result not found" 
+        });
+      }
+
+      res.json({
+        success: true,
+        message: "Result deleted successfully"
+      });
+    } else {
+      const initialLength = memoryUsers.length;
+      memoryUsers = memoryUsers.filter(u => u._id !== id);
+      
+      if (memoryUsers.length === initialLength) {
+        return res.status(404).json({ 
+          success: false, 
+          message: "Result not found" 
+        });
+      }
+
+      res.json({
+        success: true,
+        message: "Result deleted successfully (Memory Mode)"
       });
     }
-
-    res.json({
-      success: true,
-      message: "Result deleted successfully"
-    });
   } catch (error) {
     console.error("Delete result error:", error);
     res.status(500).json({ 
@@ -1029,14 +1372,22 @@ app.delete("/api/admin/results/:id", adminAuth, async (req, res) => {
 // ✅ Delete All Results
 app.delete("/api/admin/results", adminAuth, async (req, res) => {
   try {
-    await connectDB();
-    
-    const result = await User.deleteMany({});
-    
-    res.json({
-      success: true,
-      message: `Deleted ${result.deletedCount} results successfully`
-    });
+    if (dbConnected) {
+      const result = await User.deleteMany({});
+      
+      res.json({
+        success: true,
+        message: `Deleted ${result.deletedCount} results successfully`
+      });
+    } else {
+      const count = memoryUsers.length;
+      memoryUsers = [];
+      
+      res.json({
+        success: true,
+        message: `Deleted ${count} results successfully (Memory Mode)`
+      });
+    }
   } catch (error) {
     console.error("Delete all results error:", error);
     res.status(500).json({ 
@@ -1088,15 +1439,14 @@ if (process.env.NODE_ENV !== 'production') {
     
     // Initialize database
     try {
-      await connectDB();
       await initializeAll();
-      console.log("✅ Database initialized successfully");
+      console.log("✅ Initialization completed");
       console.log("📊 Available endpoints:");
       console.log(`   http://localhost:${PORT}/api/health`);
       console.log(`   http://localhost:${PORT}/api/test-db`);
       console.log(`   http://localhost:${PORT}/api/admin/login`);
     } catch (error) {
-      console.error("❌ Database initialization failed:", error);
+      console.error("❌ Initialization failed:", error);
     }
   });
 }
