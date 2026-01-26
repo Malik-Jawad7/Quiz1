@@ -1,7 +1,8 @@
-﻿// server.js
+﻿// server.js - WORKING VERSION
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
+import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -9,127 +10,112 @@ const app = express();
 
 // ================= CONFIG =================
 const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://your-username:your-password@cluster0.mongodb.net/quiz-app?retryWrites=true&w=majority";
+const MONGO_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/quiz-app";
+const JWT_SECRET = process.env.JWT_SECRET || "shamsi-institute-quiz-secret-key-2024";
 
 // ================= MIDDLEWARE =================
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ================= MONGODB CONNECTION =================
 const connectDB = async () => {
   try {
-    if (!MONGO_URI || MONGO_URI.includes("your-username")) {
-      console.log("⚠️  MongoDB URI not configured. Using in-memory data.");
-      return false;
-    }
-    
     if (mongoose.connection.readyState === 0) {
-      await mongoose.connect(MONGO_URI, {
-        useNewUrlParser: true,
-        useUnifiedTopology: true,
-      });
+      await mongoose.connect(MONGO_URI);
       console.log("✅ MongoDB Connected Successfully");
-      return true;
     }
-    return true;
   } catch (err) {
     console.error("❌ MongoDB connection error:", err.message);
-    return false;
   }
 };
 
-// Initialize database connection
-connectDB();
+// Test the connection immediately
+connectDB().catch(console.error);
 
-// ================= IN-MEMORY DATA STORAGE (Fallback) =================
-let users = [];
-let questions = [
-  {
-    _id: "1",
-    category: "mern",
-    questionText: "What does MERN stand for?",
-    options: [
-      { text: "MongoDB, Express, React, Node.js", isCorrect: true },
-      { text: "MySQL, Express, React, Node.js", isCorrect: false },
-      { text: "MongoDB, Angular, React, Node.js", isCorrect: false },
-      { text: "MongoDB, Express, Redux, Node.js", isCorrect: false }
-    ],
-    marks: 2
-  },
-  {
-    _id: "2",
-    category: "react",
-    questionText: "What is React?",
-    options: [
-      { text: "A JavaScript library for building user interfaces", isCorrect: true },
-      { text: "A programming language", isCorrect: false },
-      { text: "A database management system", isCorrect: false },
-      { text: "An operating system", isCorrect: false }
-    ],
-    marks: 1
-  }
-];
+// ================= SIMPLE MODELS =================
+const User = mongoose.model('User', new mongoose.Schema({
+  name: String,
+  rollNumber: { type: String, unique: true },
+  category: String,
+  score: { type: Number, default: 0 },
+  percentage: { type: Number, default: 0 },
+  createdAt: { type: Date, default: Date.now }
+}));
 
-let config = {
-  quizTime: 30,
-  passingPercentage: 40,
-  totalQuestions: 10
-};
+const Question = mongoose.model('Question', new mongoose.Schema({
+  category: String,
+  questionText: String,
+  options: [{
+    text: String,
+    isCorrect: Boolean
+  }],
+  marks: { type: Number, default: 1 }
+}));
 
 // ================= ROUTES =================
 
-// ✅ Root endpoint - ALWAYS WORKING
+// ✅ Root endpoint - SIMPLE TEST
 app.get("/", (req, res) => {
   res.json({ 
-    message: "🚀 Quiz API Server Running on Vercel",
+    message: "🚀 Shamsi Institute Quiz API is running!",
     status: "OK",
-    version: "1.0.0",
-    timestamp: new Date().toISOString(),
-    endpoints: [
-      "GET /api/health",
-      "GET /api/auth/register",
-      "POST /api/auth/register",
-      "GET /api/user/questions/:category",
-      "POST /api/user/submit",
-      "GET /api/config"
-    ],
-    note: "Server is working! Use the endpoints above."
+    timestamp: new Date().toISOString()
   });
 });
 
 // ✅ Health check
-app.get("/api/health", (req, res) => {
-  res.json({
-    success: true,
-    message: "Server is healthy and running",
-    server: "Vercel Deployment",
-    timestamp: new Date().toISOString(),
-    database: mongoose.connection.readyState === 1 ? "Connected" : "Using in-memory storage"
-  });
+app.get("/api/health", async (req, res) => {
+  try {
+    await connectDB();
+    res.json({
+      success: true,
+      message: "Server is healthy",
+      database: mongoose.connection.readyState === 1 ? "Connected" : "Disconnected"
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message
+    });
+  }
 });
 
-// ✅ GET Registration instructions
+// ✅ Test MongoDB connection
+app.get("/api/test-db", async (req, res) => {
+  try {
+    await connectDB();
+    const users = await User.countDocuments();
+    const questions = await Question.countDocuments();
+    
+    res.json({
+      success: true,
+      message: "Database test successful",
+      counts: {
+        users: users,
+        questions: questions
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Database test failed",
+      error: error.message
+    });
+  }
+});
+
+// ✅ GET Registration
 app.get("/api/auth/register", (req, res) => {
   res.json({
     success: true,
-    message: "Registration Endpoint",
-    instruction: "Send a POST request to this endpoint with user data",
+    message: "Registration endpoint",
+    instruction: "Send POST request with JSON body",
     example: {
-      method: "POST",
-      url: "/api/auth/register",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: {
-        name: "John Doe",
-        rollNumber: "12345",
-        category: "mern"
-      }
+      name: "Student Name",
+      rollNumber: "Unique ID",
+      category: "mern"
     }
   });
 });
@@ -137,85 +123,71 @@ app.get("/api/auth/register", (req, res) => {
 // ✅ POST Registration
 app.post("/api/auth/register", async (req, res) => {
   try {
-    console.log("📝 Registration request:", req.body);
+    await connectDB();
     
     const { name, rollNumber, category } = req.body;
     
-    // Validation
     if (!name || !rollNumber || !category) {
       return res.status(400).json({ 
         success: false, 
-        message: "All fields are required: name, rollNumber, category" 
+        message: "All fields required" 
       });
     }
 
-    // Check if user already exists
-    const existingUser = users.find(u => u.rollNumber === rollNumber);
-    if (existingUser) {
+    // Check if user exists
+    const existing = await User.findOne({ rollNumber });
+    if (existing) {
       return res.status(400).json({ 
         success: false, 
         message: "Roll number already exists" 
       });
     }
 
-    // Create new user
-    const newUser = {
-      _id: Date.now().toString(),
+    const user = new User({
       name,
       rollNumber,
-      category: category.toLowerCase(),
-      score: 0,
-      percentage: 0,
-      createdAt: new Date()
-    };
-    
-    users.push(newUser);
-    
-    console.log("✅ User registered:", newUser.rollNumber);
+      category: category.toLowerCase()
+    });
 
-    res.status(201).json({ 
+    await user.save();
+
+    res.json({ 
       success: true, 
-      message: "User registered successfully",
+      message: "Registration successful",
       user: {
-        _id: newUser._id,
-        name: newUser.name,
-        rollNumber: newUser.rollNumber,
-        category: newUser.category
+        id: user._id,
+        name: user.name,
+        rollNumber: user.rollNumber,
+        category: user.category
       }
     });
   } catch (error) {
-    console.error("❌ Registration error:", error);
+    console.error("Registration error:", error);
     res.status(500).json({ 
       success: false, 
-      message: "Server error during registration" 
+      message: "Server error" 
     });
   }
 });
 
 // ✅ Get Questions
-app.get("/api/user/questions/:category", (req, res) => {
+app.get("/api/user/questions/:category", async (req, res) => {
   try {
+    await connectDB();
+    
     const category = req.params.category.toLowerCase();
-    console.log("📝 Questions request for category:", category);
+    const questions = await Question.find({ category });
     
-    // Filter questions by category
-    const categoryQuestions = questions.filter(q => q.category === category);
-    
-    if (categoryQuestions.length === 0) {
+    if (questions.length === 0) {
       return res.status(404).json({ 
         success: false, 
-        message: `No questions found for category: ${category}` 
+        message: "No questions found" 
       });
     }
 
-    // Shuffle and limit questions
-    const shuffledQuestions = [...categoryQuestions]
-      .sort(() => Math.random() - 0.5)
-      .slice(0, config.totalQuestions);
-
-    // Don't send correct answers to client
-    const questionsForClient = shuffledQuestions.map(q => ({
-      _id: q._id,
+    // Return questions without correct answers
+    const safeQuestions = questions.map(q => ({
+      id: q._id,
       questionText: q.questionText,
       options: q.options.map(opt => ({ text: opt.text })),
       marks: q.marks
@@ -223,36 +195,34 @@ app.get("/api/user/questions/:category", (req, res) => {
 
     res.json({
       success: true,
-      questions: questionsForClient,
-      timeLimit: config.quizTime,
-      totalQuestions: questionsForClient.length,
+      questions: safeQuestions,
+      count: safeQuestions.length,
       category: category
     });
   } catch (error) {
-    console.error("❌ Questions error:", error);
+    console.error("Questions error:", error);
     res.status(500).json({ 
       success: false, 
-      message: "Error loading questions" 
+      message: "Server error" 
     });
   }
 });
 
 // ✅ Submit Quiz
-app.post("/api/user/submit", (req, res) => {
+app.post("/api/user/submit", async (req, res) => {
   try {
-    console.log("📝 Quiz submission:", req.body);
+    await connectDB();
     
     const { userId, answers } = req.body;
     
     if (!userId || !answers) {
       return res.status(400).json({ 
         success: false, 
-        message: "userId and answers are required" 
+        message: "Missing data" 
       });
     }
 
-    // Find user
-    const user = users.find(u => u._id === userId);
+    const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ 
         success: false, 
@@ -260,41 +230,27 @@ app.post("/api/user/submit", (req, res) => {
       });
     }
 
-    // Calculate score
+    const questions = await Question.find({ category: user.category });
+    
     let score = 0;
     let totalMarks = 0;
-    const results = [];
 
-    // Get user's category questions
-    const userQuestions = questions.filter(q => q.category === user.category);
-    
-    userQuestions.forEach(question => {
+    for (const question of questions) {
       const userAnswer = answers[question._id];
       const correctOption = question.options.find(opt => opt.isCorrect);
-      const isCorrect = userAnswer && correctOption && userAnswer === correctOption.text;
       
-      if (isCorrect) {
+      if (userAnswer && correctOption && userAnswer === correctOption.text) {
         score += question.marks || 1;
       }
       totalMarks += question.marks || 1;
-      
-      results.push({
-        questionId: question._id,
-        questionText: question.questionText,
-        userAnswer: userAnswer || "Not answered",
-        correctAnswer: correctOption?.text || "No correct answer",
-        isCorrect,
-        marks: question.marks || 1
-      });
-    });
+    }
 
-    // Calculate percentage
     const percentage = totalMarks > 0 ? (score / totalMarks) * 100 : 0;
-    const passed = percentage >= config.passingPercentage;
+    const passed = percentage >= 40; // 40% passing
 
-    // Update user
     user.score = score;
     user.percentage = percentage;
+    await user.save();
 
     res.json({
       success: true,
@@ -302,114 +258,88 @@ app.post("/api/user/submit", (req, res) => {
       totalMarks: totalMarks,
       percentage: percentage.toFixed(2),
       passed: passed,
-      grade: passed ? 'PASS' : 'FAIL',
-      message: passed ? '🎉 Congratulations! You passed.' : '😞 Try again next time.',
-      results: results,
-      user: {
-        _id: user._id,
-        name: user.name,
-        rollNumber: user.rollNumber
-      }
+      message: passed ? "Congratulations! You passed." : "Try again."
     });
   } catch (error) {
-    console.error("❌ Submit error:", error);
+    console.error("Submit error:", error);
     res.status(500).json({ 
       success: false, 
-      message: "Error submitting quiz" 
+      message: "Server error" 
     });
   }
 });
 
-// ✅ Get Config
-app.get("/api/config", (req, res) => {
-  res.json({
-    success: true,
-    config: config
-  });
+// ✅ Initialize Database with Sample Data
+app.get("/api/init", async (req, res) => {
+  try {
+    await connectDB();
+    
+    // Clear existing data
+    await User.deleteMany({});
+    await Question.deleteMany({});
+    
+    // Add sample questions
+    const sampleQuestions = [
+      {
+        category: "mern",
+        questionText: "What does MERN stand for?",
+        options: [
+          { text: "MongoDB, Express, React, Node.js", isCorrect: true },
+          { text: "MySQL, Express, React, Node.js", isCorrect: false },
+          { text: "MongoDB, Angular, React, Node.js", isCorrect: false }
+        ],
+        marks: 2
+      },
+      {
+        category: "mern",
+        questionText: "Which database is used in MERN stack?",
+        options: [
+          { text: "MongoDB", isCorrect: true },
+          { text: "MySQL", isCorrect: false },
+          { text: "PostgreSQL", isCorrect: false }
+        ],
+        marks: 1
+      }
+    ];
+    
+    await Question.insertMany(sampleQuestions);
+    
+    res.json({
+      success: true,
+      message: "Database initialized with sample data",
+      questions: await Question.countDocuments()
+    });
+  } catch (error) {
+    console.error("Init error:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Initialization failed" 
+    });
+  }
 });
 
-// ✅ Initialize endpoint
-app.get("/api/init", (req, res) => {
-  // Reset users and add sample data
-  users = [];
-  questions = [
-    {
-      _id: "1",
-      category: "mern",
-      questionText: "What does MERN stand for?",
-      options: [
-        { text: "MongoDB, Express, React, Node.js", isCorrect: true },
-        { text: "MySQL, Express, React, Node.js", isCorrect: false },
-        { text: "MongoDB, Angular, React, Node.js", isCorrect: false }
-      ],
-      marks: 2
-    },
-    {
-      _id: "2",
-      category: "react",
-      questionText: "What is React?",
-      options: [
-        { text: "A JavaScript library", isCorrect: true },
-        { text: "A programming language", isCorrect: false },
-        { text: "A database", isCorrect: false }
-      ],
-      marks: 1
-    }
-  ];
-  
-  res.json({
-    success: true,
-    message: "Database initialized with sample data",
-    usersCount: users.length,
-    questionsCount: questions.length
-  });
-});
-
-// ✅ Test endpoint
-app.get("/api/test", (req, res) => {
-  res.json({
-    success: true,
-    message: "Test endpoint is working!",
-    data: {
-      serverTime: new Date().toISOString(),
-      server: "Vercel",
-      status: "Active"
-    }
-  });
-});
-
-// ✅ 404 Handler - MUST BE LAST
+// ================= ERROR HANDLING =================
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: `Route not found: ${req.method} ${req.originalUrl}`,
-    availableRoutes: [
+    message: "Endpoint not found",
+    available: [
       "GET /",
       "GET /api/health",
-      "GET /api/test",
+      "GET /api/test-db",
+      "GET /api/init",
       "GET /api/auth/register",
       "POST /api/auth/register",
       "GET /api/user/questions/:category",
-      "POST /api/user/submit",
-      "GET /api/config",
-      "GET /api/init"
+      "POST /api/user/submit"
     ]
   });
 });
 
-// ================= SERVER START =================
+// ================= START SERVER =================
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`📋 MongoDB URI: ${MONGO_URI ? "Configured" : "Not configured"}`);
+});
 
-// For local development
-if (process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-    console.log(`📋 Endpoints:`);
-    console.log(`   GET  /`);
-    console.log(`   GET  /api/health`);
-    console.log(`   POST /api/auth/register`);
-    console.log(`   GET  /api/user/questions/:category`);
-  });
-}
-
-// Export for Vercel
 export default app;
