@@ -7,23 +7,41 @@ dotenv.config();
 
 const app = express();
 
-// CORS Configuration
-app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:3000'],
-  credentials: true
-}));
+// Enhanced CORS Configuration for Vercel
+const corsOptions = {
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'https://quiz2-iota-one.vercel.app',
+    'https://quiz2-4cwxe0m3j-khalids-projects-3de9ee65.vercel.app',
+    'https://quiz2-git-main-khalids-projects-3de9ee65.vercel.app',
+    'https://quiz2-*.vercel.app',
+    'https://vercel.app'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // Preflight requests
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// MongoDB Connection
-const MONGODB_URI = 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority&appName=Cluster0';
-const LOCAL_MONGODB_URI = 'mongodb://127.0.0.1:27017/quiz_system';
+// MongoDB Connection with Vercel environment support
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority&appName=Cluster0';
 
 console.log('🔗 MongoDB Connecting...');
+console.log('MongoDB URI:', MONGODB_URI ? 'Present' : 'Missing');
+
 mongoose.connect(MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 5000,
+  serverSelectionTimeoutMS: 15000,
+  socketTimeoutMS: 45000,
+  connectTimeoutMS: 15000
 })
 .then(() => {
   console.log('✅ MongoDB Atlas Connected Successfully!');
@@ -31,19 +49,7 @@ mongoose.connect(MONGODB_URI, {
 })
 .catch(err => {
   console.error('❌ MongoDB Atlas Connection Error:', err.message);
-  console.log('🔄 Trying to connect to local MongoDB...');
-  
-  mongoose.connect(LOCAL_MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => {
-    console.log('✅ Local MongoDB Connected Successfully!');
-    initializeDefaultData();
-  })
-  .catch(localErr => {
-    console.error('❌ Local MongoDB Connection Error:', localErr.message);
-  });
+  console.error('Full Error:', err);
 });
 
 // Schemas
@@ -109,7 +115,6 @@ const initializeDefaultData = async () => {
     const questionCount = await Question.countDocuments();
     if (questionCount === 0) {
       const sampleQuestions = [
-        // HTML Questions
         {
           category: 'html',
           questionText: 'What does HTML stand for?',
@@ -134,7 +139,6 @@ const initializeDefaultData = async () => {
           marks: 10,
           difficulty: 'easy'
         },
-        // Add at least 3 questions per category for testing
         {
           category: 'css',
           questionText: 'What does CSS stand for?',
@@ -148,6 +152,18 @@ const initializeDefaultData = async () => {
           difficulty: 'easy'
         },
         {
+          category: 'css',
+          questionText: 'Which property is used to change the background color?',
+          options: [
+            { text: 'background-color', isCorrect: true },
+            { text: 'color', isCorrect: false },
+            { text: 'bgcolor', isCorrect: false },
+            { text: 'background', isCorrect: false }
+          ],
+          marks: 10,
+          difficulty: 'easy'
+        },
+        {
           category: 'javascript',
           questionText: 'What is JavaScript?',
           options: [
@@ -155,6 +171,42 @@ const initializeDefaultData = async () => {
             { text: 'A markup language', isCorrect: false },
             { text: 'A database', isCorrect: false },
             { text: 'A framework', isCorrect: false }
+          ],
+          marks: 10,
+          difficulty: 'easy'
+        },
+        {
+          category: 'javascript',
+          questionText: 'Which operator is used to assign a value to a variable?',
+          options: [
+            { text: '=', isCorrect: true },
+            { text: '==', isCorrect: false },
+            { text: '===', isCorrect: false },
+            { text: '->', isCorrect: false }
+          ],
+          marks: 10,
+          difficulty: 'easy'
+        },
+        {
+          category: 'react',
+          questionText: 'What is React?',
+          options: [
+            { text: 'A JavaScript library for building user interfaces', isCorrect: true },
+            { text: 'A programming language', isCorrect: false },
+            { text: 'A database', isCorrect: false },
+            { text: 'An operating system', isCorrect: false }
+          ],
+          marks: 10,
+          difficulty: 'easy'
+        },
+        {
+          category: 'mern',
+          questionText: 'What does MERN stand for?',
+          options: [
+            { text: 'MongoDB, Express, React, Node.js', isCorrect: true },
+            { text: 'MySQL, Express, React, Node.js', isCorrect: false },
+            { text: 'MongoDB, Express, Redux, Node.js', isCorrect: false },
+            { text: 'MongoDB, Elasticsearch, React, Node.js', isCorrect: false }
           ],
           marks: 10,
           difficulty: 'easy'
@@ -208,7 +260,8 @@ app.get('/api', (req, res) => {
     database: {
       status: statusMessages[dbStatus] || 'Unknown',
       connected: dbStatus === 1
-    }
+    },
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
@@ -229,11 +282,13 @@ app.get('/api/health', (req, res) => {
     database: {
       status: statusMessages[dbStatus] || 'Unknown',
       connected: dbStatus === 1
-    }
+    },
+    environment: process.env.NODE_ENV || 'development',
+    version: '1.0.0'
   });
 });
 
-// Get Available Categories - THIS IS THE MISSING ROUTE
+// Get Available Categories
 app.get('/api/categories', async (req, res) => {
   try {
     const categories = await Question.distinct('category');
@@ -245,7 +300,7 @@ app.get('/api/categories', async (req, res) => {
         value: category,
         label: category.toUpperCase(),
         questionCount,
-        isReady: questionCount >= 3 // Reduced for testing
+        isReady: questionCount >= 3
       });
     }
     
@@ -255,6 +310,7 @@ app.get('/api/categories', async (req, res) => {
       totalAvailable: categories.length
     });
   } catch (error) {
+    console.error('Error fetching categories:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Failed to fetch categories',
@@ -267,6 +323,8 @@ app.get('/api/categories', async (req, res) => {
 app.post('/api/admin/login', async (req, res) => {
   try {
     const { username, password } = req.body;
+    
+    console.log('Admin login attempt:', { username, password });
     
     const admin = await Admin.findOne({ username });
     
@@ -287,6 +345,7 @@ app.post('/api/admin/login', async (req, res) => {
       });
     }
   } catch (error) {
+    console.error('Admin login error:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Server error',
@@ -321,6 +380,46 @@ app.get('/api/config', async (req, res) => {
   }
 });
 
+// Update Config
+app.put('/api/config', async (req, res) => {
+  try {
+    const { quizTime, passingPercentage, totalQuestions } = req.body;
+    
+    let config = await Config.findOne();
+    if (!config) {
+      config = new Config({ 
+        quizTime, 
+        passingPercentage, 
+        totalQuestions 
+      });
+    } else {
+      config.quizTime = quizTime || config.quizTime;
+      config.passingPercentage = passingPercentage || config.passingPercentage;
+      config.totalQuestions = totalQuestions || config.totalQuestions;
+      config.updatedAt = new Date();
+    }
+    
+    await config.save();
+    
+    res.json({
+      success: true,
+      message: 'Configuration updated successfully',
+      config: {
+        quizTime: config.quizTime,
+        passingPercentage: config.passingPercentage,
+        totalQuestions: config.totalQuestions,
+        updatedAt: config.updatedAt
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to update config',
+      error: error.message 
+    });
+  }
+});
+
 // User Registration
 app.post('/api/auth/register', async (req, res) => {
   try {
@@ -341,7 +440,7 @@ app.post('/api/auth/register', async (req, res) => {
       });
     }
     
-    const questionCount = await Question.countDocuments({ category });
+    const questionCount = await Question.countDocuments({ category: category.toLowerCase() });
     if (questionCount === 0) {
       return res.status(400).json({
         success: false,
@@ -352,7 +451,7 @@ app.post('/api/auth/register', async (req, res) => {
     const user = new User({
       name,
       rollNumber,
-      category
+      category: category.toLowerCase()
     });
     
     await user.save();
@@ -369,6 +468,7 @@ app.post('/api/auth/register', async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Registration error:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Registration failed',
@@ -628,6 +728,50 @@ app.get('/api/admin/questions', async (req, res) => {
   }
 });
 
+// Add Question (Admin)
+app.post('/api/admin/questions', async (req, res) => {
+  try {
+    const { category, questionText, options, marks, difficulty } = req.body;
+    
+    if (!category || !questionText || !options || options.length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide category, question text, and at least 2 options'
+      });
+    }
+    
+    const hasCorrectOption = options.some(opt => opt.isCorrect);
+    if (!hasCorrectOption) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one option must be marked as correct'
+      });
+    }
+    
+    const question = new Question({
+      category: category.toLowerCase(),
+      questionText,
+      options,
+      marks: marks || 1,
+      difficulty: difficulty || 'medium'
+    });
+    
+    await question.save();
+    
+    res.status(201).json({
+      success: true,
+      message: 'Question added successfully',
+      question
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to add question',
+      error: error.message 
+    });
+  }
+});
+
 // Get All Results (Admin)
 app.get('/api/admin/results', async (req, res) => {
   try {
@@ -641,6 +785,30 @@ app.get('/api/admin/results', async (req, res) => {
     res.status(500).json({ 
       success: false, 
       message: 'Failed to fetch results',
+      error: error.message 
+    });
+  }
+});
+
+// Delete Result (Admin)
+app.delete('/api/admin/results/:id', async (req, res) => {
+  try {
+    const result = await User.findByIdAndDelete(req.params.id);
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        message: 'Result not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Result deleted successfully'
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to delete result',
       error: error.message 
     });
   }
@@ -663,7 +831,9 @@ app.get('/', (req, res) => {
     success: true,
     message: 'Welcome to Shamsi Institute Quiz System',
     api: 'Use /api for API endpoints',
-    health: 'Check /api/health for server status'
+    health: 'Check /api/health for server status',
+    frontend: 'https://quiz2-iota-one.vercel.app',
+    version: '1.0.0'
   });
 });
 
@@ -674,7 +844,8 @@ app.use((err, req, res, next) => {
   res.status(500).json({
     success: false,
     message: 'Internal server error',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -682,9 +853,10 @@ const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
   console.log(`
-  🚀 Server running on http://localhost:${PORT}
+  🚀 Server running on port ${PORT}
   📡 API Base URL: http://localhost:${PORT}/api
-  🔗 Health Check: http://localhost:${PORT}/api/health
+  🌐 Production URL: https://backend-one-taupe-14.vercel.app
+  🔗 Health Check: /api/health
   👨‍💼 Admin Login: admin / admin123
   📊 MongoDB Status: ${mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌'}
   ⏰ Started at: ${new Date().toLocaleString()}
