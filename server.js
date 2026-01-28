@@ -23,31 +23,22 @@ app.options('*', cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// MongoDB Connection with error handling
+// MongoDB Connection
 const MONGODB_URI = 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
 
-let isConnected = false;
+console.log('🔗 MongoDB Connecting...');
 
-const connectDB = async () => {
-  if (isConnected) return;
-  
-  try {
-    await mongoose.connect(MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-    isConnected = true;
-    console.log('✅ MongoDB Connected Successfully!');
-    
-    // Initialize data
-    await initializeDefaultData();
-  } catch (error) {
-    console.error('❌ MongoDB Connection Error:', error.message);
-  }
-};
-
-// Connect to database
-connectDB();
+mongoose.connect(MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => {
+  console.log('✅ MongoDB Atlas Connected Successfully!');
+  initializeDefaultData();
+})
+.catch(err => {
+  console.error('❌ MongoDB Connection Error:', err.message);
+});
 
 // Schemas
 const UserSchema = new mongoose.Schema({
@@ -99,8 +90,6 @@ const initializeDefaultData = async () => {
       admin = new Admin();
       await admin.save();
       console.log('✅ Default admin created');
-    } else {
-      console.log('✅ Admin already exists');
     }
 
     // Default config
@@ -128,6 +117,18 @@ const initializeDefaultData = async () => {
           difficulty: 'easy'
         },
         {
+          category: 'html',
+          questionText: 'Which HTML tag is used for the largest heading?',
+          options: [
+            { text: '<h1>', isCorrect: true },
+            { text: '<head>', isCorrect: false },
+            { text: '<heading>', isCorrect: false },
+            { text: '<h6>', isCorrect: false }
+          ],
+          marks: 10,
+          difficulty: 'easy'
+        },
+        {
           category: 'css',
           questionText: 'What does CSS stand for?',
           options: [
@@ -135,6 +136,90 @@ const initializeDefaultData = async () => {
             { text: 'Computer Style Sheets', isCorrect: false },
             { text: 'Creative Style System', isCorrect: false },
             { text: 'Colorful Style Sheets', isCorrect: false }
+          ],
+          marks: 10,
+          difficulty: 'easy'
+        },
+        {
+          category: 'css',
+          questionText: 'Which property is used to change the background color?',
+          options: [
+            { text: 'background-color', isCorrect: true },
+            { text: 'color', isCorrect: false },
+            { text: 'bgcolor', isCorrect: false },
+            { text: 'background', isCorrect: false }
+          ],
+          marks: 10,
+          difficulty: 'easy'
+        },
+        {
+          category: 'javascript',
+          questionText: 'What is JavaScript?',
+          options: [
+            { text: 'A programming language', isCorrect: true },
+            { text: 'A markup language', isCorrect: false },
+            { text: 'A database', isCorrect: false },
+            { text: 'A framework', isCorrect: false }
+          ],
+          marks: 10,
+          difficulty: 'easy'
+        },
+        {
+          category: 'javascript',
+          questionText: 'Which operator is used to assign a value to a variable?',
+          options: [
+            { text: '=', isCorrect: true },
+            { text: '==', isCorrect: false },
+            { text: '===', isCorrect: false },
+            { text: '->', isCorrect: false }
+          ],
+          marks: 10,
+          difficulty: 'easy'
+        },
+        {
+          category: 'react',
+          questionText: 'What is React?',
+          options: [
+            { text: 'A JavaScript library for building user interfaces', isCorrect: true },
+            { text: 'A programming language', isCorrect: false },
+            { text: 'A database', isCorrect: false },
+            { text: 'An operating system', isCorrect: false }
+          ],
+          marks: 10,
+          difficulty: 'easy'
+        },
+        {
+          category: 'react',
+          questionText: 'What does JSX stand for?',
+          options: [
+            { text: 'JavaScript XML', isCorrect: true },
+            { text: 'Java Syntax Extension', isCorrect: false },
+            { text: 'JavaScript Extension', isCorrect: false },
+            { text: 'Java XML', isCorrect: false }
+          ],
+          marks: 10,
+          difficulty: 'easy'
+        },
+        {
+          category: 'mern',
+          questionText: 'What does MERN stand for?',
+          options: [
+            { text: 'MongoDB, Express, React, Node.js', isCorrect: true },
+            { text: 'MySQL, Express, React, Node.js', isCorrect: false },
+            { text: 'MongoDB, Express, Redux, Node.js', isCorrect: false },
+            { text: 'MongoDB, Elasticsearch, React, Node.js', isCorrect: false }
+          ],
+          marks: 10,
+          difficulty: 'easy'
+        },
+        {
+          category: 'mern',
+          questionText: 'Which of the following is NOT part of MERN stack?',
+          options: [
+            { text: 'MySQL', isCorrect: true },
+            { text: 'Express', isCorrect: false },
+            { text: 'React', isCorrect: false },
+            { text: 'Node.js', isCorrect: false }
           ],
           marks: 10,
           difficulty: 'easy'
@@ -147,40 +232,22 @@ const initializeDefaultData = async () => {
     
     console.log('📊 Database initialized successfully');
   } catch (error) {
-    console.error('❌ Error initializing data:', error.message);
+    console.error('❌ Error initializing data:', error);
   }
 };
 
 // ==================== API ROUTES ====================
 
 // Health Check
-app.get('/api/health', async (req, res) => {
-  try {
-    const dbStatus = mongoose.connection.readyState;
-    const statusMessages = {
-      0: 'Disconnected',
-      1: 'Connected',
-      2: 'Connecting',
-      3: 'Disconnecting'
-    };
-    
-    res.json({
-      success: true,
-      message: 'Shamsi Institute Quiz System API',
-      timestamp: new Date().toISOString(),
-      database: {
-        status: statusMessages[dbStatus] || 'Unknown',
-        connected: dbStatus === 1
-      },
-      version: '1.0.0'
-    });
-  } catch (error) {
-    res.json({
-      success: false,
-      message: 'API Error',
-      error: error.message
-    });
-  }
+app.get('/api/health', (req, res) => {
+  const dbStatus = mongoose.connection.readyState;
+  res.json({
+    success: true,
+    message: 'Shamsi Institute Quiz System API',
+    timestamp: new Date().toISOString(),
+    database: dbStatus === 1 ? 'Connected' : 'Disconnected',
+    version: '1.0.0'
+  });
 });
 
 // Admin Login
@@ -188,13 +255,10 @@ app.post('/api/admin/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     
-    console.log('Admin login attempt for:', username);
-    
-    // First try database
     const admin = await Admin.findOne({ username });
     
-    if (admin && admin.password === password) {
-      return res.json({
+    if (admin && password === admin.password) {
+      res.json({
         success: true,
         message: 'Login successful',
         user: { 
@@ -203,28 +267,13 @@ app.post('/api/admin/login', async (req, res) => {
           email: admin.email 
         }
       });
-    }
-    
-    // Fallback to hardcoded credentials
-    if (username === 'admin' && password === 'admin123') {
-      return res.json({
-        success: true,
-        message: 'Login successful',
-        user: { 
-          username: 'admin', 
-          role: 'admin',
-          email: 'admin@shamsi.edu.pk' 
-        }
+    } else {
+      res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
       });
     }
-    
-    res.status(401).json({
-      success: false,
-      message: 'Invalid credentials'
-    });
-    
   } catch (error) {
-    console.error('Login error:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Server error',
@@ -241,7 +290,6 @@ app.get('/api/config', async (req, res) => {
       config = new Config();
       await config.save();
     }
-    
     res.json({
       success: true,
       config: {
@@ -252,15 +300,10 @@ app.get('/api/config', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Config error:', error);
-    res.json({
-      success: true,
-      config: {
-        quizTime: 30,
-        passingPercentage: 40,
-        totalQuestions: 50,
-        updatedAt: new Date()
-      }
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch config',
+      error: error.message 
     });
   }
 });
@@ -321,35 +364,251 @@ app.get('/api/categories', async (req, res) => {
       });
     }
     
-    // If no categories in DB, return default
-    if (categoryInfo.length === 0) {
-      return res.json({
-        success: true,
-        categories: [
-          { value: 'html', label: 'HTML', questionCount: 5, isReady: true },
-          { value: 'css', label: 'CSS', questionCount: 5, isReady: true },
-          { value: 'javascript', label: 'JAVASCRIPT', questionCount: 5, isReady: true },
-          { value: 'react', label: 'REACT', questionCount: 5, isReady: true },
-          { value: 'mern', label: 'MERN', questionCount: 5, isReady: true }
-        ]
-      });
-    }
-    
     res.json({
       success: true,
       categories: categoryInfo
     });
   } catch (error) {
-    console.error('Categories error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch categories',
+      error: error.message 
+    });
+  }
+});
+
+// User Registration - FIXED VERSION
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { name, rollNumber, category } = req.body;
+    
+    console.log('📝 Registration attempt:', { name, rollNumber, category });
+    
+    if (!name || !rollNumber || !category) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide name, roll number, and category'
+      });
+    }
+    
+    const existingUser = await User.findOne({ rollNumber });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'Roll number already registered'
+      });
+    }
+    
+    const questionCount = await Question.countDocuments({ category: category.toLowerCase() });
+    if (questionCount === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No questions available for this category. Please select another category.'
+      });
+    }
+    
+    const user = new User({
+      name,
+      rollNumber,
+      category: category.toLowerCase(),
+      createdAt: new Date()
+    });
+    
+    await user.save();
+    
+    res.status(201).json({
+      success: true,
+      message: 'Registration successful! You can now start the quiz.',
+      user: {
+        _id: user._id,
+        name: user.name,
+        rollNumber: user.rollNumber,
+        category: user.category,
+        createdAt: user.createdAt
+      }
+    });
+    
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Registration failed',
+      error: error.message 
+    });
+  }
+});
+
+// Get Questions by Category for Quiz - FIXED VERSION
+app.get('/api/quiz/questions/:category', async (req, res) => {
+  try {
+    const { category } = req.params;
+    
+    const config = await Config.findOne();
+    const totalQuestions = config ? config.totalQuestions : 10;
+    
+    const allQuestions = await Question.find({ category: category.toLowerCase() });
+    
+    if (allQuestions.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No questions found for category: ${category}`
+      });
+    }
+    
+    const shuffledQuestions = [...allQuestions]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, Math.min(totalQuestions, allQuestions.length));
+    
+    const questionsForQuiz = shuffledQuestions.map(question => ({
+      _id: question._id,
+      category: question.category,
+      questionText: question.questionText,
+      options: question.options.map(opt => ({
+        text: opt.text,
+      })),
+      marks: question.marks
+    }));
+    
     res.json({
       success: true,
-      categories: [
-        { value: 'html', label: 'HTML', questionCount: 10, isReady: true },
-        { value: 'css', label: 'CSS', questionCount: 10, isReady: true },
-        { value: 'javascript', label: 'JAVASCRIPT', questionCount: 10, isReady: true },
-        { value: 'react', label: 'REACT', questionCount: 10, isReady: true },
-        { value: 'mern', label: 'MERN', questionCount: 10, isReady: true }
-      ]
+      questions: questionsForQuiz,
+      category: category,
+      totalQuestions: questionsForQuiz.length,
+      totalAvailable: allQuestions.length,
+      totalMarks: questionsForQuiz.reduce((sum, q) => sum + (q.marks || 1), 0)
+    });
+    
+  } catch (error) {
+    console.error('Error fetching quiz questions:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch quiz questions',
+      error: error.message 
+    });
+  }
+});
+
+// Submit Quiz - FIXED VERSION
+app.post('/api/quiz/submit', async (req, res) => {
+  try {
+    const { rollNumber, answers, timeLeft } = req.body;
+    
+    if (!rollNumber || !answers || !Array.isArray(answers)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide roll number and answers array'
+      });
+    }
+    
+    const user = await User.findOne({ rollNumber });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found. Please register first.'
+      });
+    }
+    
+    if (user.submittedAt) {
+      return res.status(400).json({
+        success: false,
+        message: 'Quiz already submitted'
+      });
+    }
+    
+    let score = 0;
+    let totalMarks = 0;
+    
+    for (const answer of answers) {
+      const question = await Question.findById(answer.questionId);
+      if (question) {
+        totalMarks += question.marks || 1;
+        
+        const correctOption = question.options.find(opt => opt.isCorrect);
+        if (correctOption && correctOption.text === answer.selectedOption) {
+          score += question.marks || 1;
+        }
+      }
+    }
+    
+    const percentage = totalMarks > 0 ? (score / totalMarks) * 100 : 0;
+    
+    const config = await Config.findOne();
+    const passingPercentage = config ? config.passingPercentage : 40;
+    const passed = percentage >= passingPercentage;
+    
+    user.score = score;
+    user.marksObtained = score;
+    user.totalMarks = totalMarks;
+    user.percentage = parseFloat(percentage.toFixed(2));
+    user.passed = passed;
+    user.submittedAt = new Date();
+    
+    await user.save();
+    
+    res.json({
+      success: true,
+      message: 'Quiz submitted successfully',
+      result: {
+        name: user.name,
+        rollNumber: user.rollNumber,
+        category: user.category,
+        score: score,
+        totalMarks: totalMarks,
+        percentage: user.percentage,
+        passed: passed,
+        timeLeft: timeLeft,
+        submittedAt: user.submittedAt,
+        createdAt: user.createdAt
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error submitting quiz:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to submit quiz',
+      error: error.message 
+    });
+  }
+});
+
+// Get User Result
+app.get('/api/result/:rollNumber', async (req, res) => {
+  try {
+    const user = await User.findOne({ rollNumber: req.params.rollNumber });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Result not found for this roll number'
+      });
+    }
+    
+    if (!user.submittedAt) {
+      return res.status(400).json({
+        success: false,
+        message: 'Quiz not submitted yet'
+      });
+    }
+    
+    res.json({
+      success: true,
+      result: {
+        name: user.name,
+        rollNumber: user.rollNumber,
+        category: user.category,
+        score: user.score,
+        totalMarks: user.totalMarks,
+        percentage: user.percentage,
+        passed: user.passed,
+        submittedAt: user.submittedAt,
+        createdAt: user.createdAt
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch result',
+      error: error.message 
     });
   }
 });
@@ -541,6 +800,32 @@ app.get('/api/admin/dashboard', async (req, res) => {
   try {
     const totalStudents = await User.countDocuments();
     const totalQuestions = await Question.countDocuments();
+    const users = await User.find();
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayAttempts = await User.countDocuments({
+      createdAt: { $gte: today }
+    });
+    
+    const totalPercentage = users.reduce((sum, user) => sum + (user.percentage || 0), 0);
+    const averageScore = totalStudents > 0 ? (totalPercentage / totalStudents).toFixed(2) : 0;
+    
+    const passedStudents = users.filter(user => user.passed).length;
+    const passRate = totalStudents > 0 ? ((passedStudents / totalStudents) * 100).toFixed(2) : 0;
+    
+    const categories = await Question.distinct('category');
+    const categoryStats = [];
+    
+    for (const category of categories) {
+      const questionsInCategory = await Question.countDocuments({ category });
+      const attemptsInCategory = await User.countDocuments({ category });
+      categoryStats.push({
+        category,
+        questions: questionsInCategory,
+        attempts: attemptsInCategory
+      });
+    }
     
     res.json({
       success: true,
@@ -548,28 +833,19 @@ app.get('/api/admin/dashboard', async (req, res) => {
         totalStudents,
         totalQuestions,
         totalAttempts: totalStudents,
-        averageScore: 0,
-        passRate: 0,
-        todayAttempts: 0,
-        passedStudents: 0,
-        failedStudents: 0
+        averageScore: parseFloat(averageScore),
+        passRate: parseFloat(passRate),
+        todayAttempts,
+        passedStudents,
+        failedStudents: totalStudents - passedStudents
       },
-      categoryStats: []
+      categoryStats
     });
   } catch (error) {
-    res.json({
-      success: true,
-      stats: {
-        totalStudents: 0,
-        totalQuestions: 0,
-        totalAttempts: 0,
-        averageScore: 0,
-        passRate: 0,
-        todayAttempts: 0,
-        passedStudents: 0,
-        failedStudents: 0
-      },
-      categoryStats: []
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to get dashboard stats',
+      error: error.message 
     });
   }
 });
@@ -590,8 +866,12 @@ app.get('/', (req, res) => {
       },
       quiz: {
         categories: '/api/categories',
-        config: '/api/config'
-      }
+        register: '/api/auth/register',
+        questions: '/api/quiz/questions/:category',
+        submit: '/api/quiz/submit',
+        result: '/api/result/:rollNumber'
+      },
+      config: '/api/config'
     }
   });
 });
@@ -625,6 +905,7 @@ if (process.env.NODE_ENV !== 'production') {
     📡 API Base URL: http://localhost:${PORT}/api
     🔗 Health Check: http://localhost:${PORT}/api/health
     👨‍💼 Admin Login: admin / admin123
+    📊 MongoDB Status: ${mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌'}
     `);
   });
 }
