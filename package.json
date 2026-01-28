@@ -1,5 +1,5 @@
 {
-  "name": "shamsi-institute-backend",
+  "name": "shamsi-quiz-backend",
   "version": "1.0.0",
   "description": "Backend for Shamsi Institute Quiz System",
   "main": "server.js",
@@ -8,21 +8,18 @@
     "dev": "nodemon server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "keywords": ["quiz", "exam", "education", "mern"],
+  "author": "Shamsi Institute",
+  "license": "ISC",
   "dependencies": {
     "express": "^4.18.2",
-    "cors": "^2.8.5",
     "mongoose": "^7.5.0",
+    "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
-  },
-  "engines": {
-    "node": ">=16.0.0"
-  },
-  "keywords": ["quiz", "education", "nodejs", "express", "mongodb"],
-  "author": "Shamsi Institute",
-  "license": "MIT"
+  }
 }
