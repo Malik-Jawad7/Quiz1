@@ -6,8 +6,10 @@ const app = express();
 
 // CORS Configuration
 app.use(cors({
-  origin: ['https://quiz2-iota-one.vercel.app', 'http://localhost:5173'],
-  credentials: true
+  origin: ['https://quiz2-iota-one.vercel.app', 'http://localhost:5173', 'http://localhost:3000'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(express.json());
@@ -71,12 +73,25 @@ const Admin = mongoose.model('Admin', AdminSchema);
 // Initialize default data
 const initializeDefaultData = async () => {
   try {
-    // Default admin
+    console.log('📊 Initializing database with default data...');
+    
+    // Check and create default admin if not exists
     let admin = await Admin.findOne({ username: 'admin' });
     if (!admin) {
-      admin = new Admin();
+      console.log('Creating default admin...');
+      admin = new Admin({
+        username: 'admin',
+        password: 'admin123',
+        email: 'admin@shamsi.edu.pk'
+      });
       await admin.save();
       console.log('✅ Default admin created');
+    } else {
+      console.log('✅ Admin already exists:', {
+        username: admin.username,
+        password: admin.password,
+        email: admin.email
+      });
     }
 
     // Default config
@@ -85,11 +100,13 @@ const initializeDefaultData = async () => {
       config = new Config();
       await config.save();
       console.log('✅ Default config created');
+    } else {
+      console.log('✅ Config already exists');
     }
 
-    console.log('📊 Database initialized successfully');
+    console.log('📊 Database initialization complete!');
   } catch (error) {
-    console.error('❌ Error initializing data:', error);
+    console.error('❌ Error initializing data:', error.message);
   }
 };
 
@@ -101,20 +118,56 @@ app.get('/api/health', (req, res) => {
     success: true,
     message: 'Shamsi Institute Quiz System API',
     timestamp: new Date().toISOString(),
-    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
-    version: '1.0.0'
+    database: mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌',
+    version: '1.0.0',
+    endpoints: {
+      admin: '/api/admin/login',
+      categories: '/api/categories',
+      register: '/api/auth/register',
+      config: '/api/config'
+    }
   });
 });
 
-// Admin Login
+// Admin Login - FIXED with better debugging
 app.post('/api/admin/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     
-    const admin = await Admin.findOne({ username });
+    console.log('🔐 Admin login attempt:', { username, password });
     
-    if (admin && password === admin.password) {
-      res.json({
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username and password are required'
+      });
+    }
+    
+    // Find admin with case-insensitive username
+    const admin = await Admin.findOne({ 
+      username: { $regex: new RegExp(`^${username}$`, 'i') }
+    });
+    
+    if (!admin) {
+      console.log('❌ Admin not found for username:', username);
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid username or password'
+      });
+    }
+    
+    console.log('✅ Admin found:', {
+      id: admin._id,
+      dbUsername: admin.username,
+      dbPassword: admin.password,
+      inputPassword: password
+    });
+    
+    // Compare passwords (case-sensitive)
+    if (admin.password === password) {
+      console.log('✅ Password matches! Login successful');
+      
+      return res.json({
         success: true,
         message: 'Login successful',
         user: { 
@@ -124,15 +177,254 @@ app.post('/api/admin/login', async (req, res) => {
         }
       });
     } else {
-      res.status(401).json({
+      console.log('❌ Password mismatch');
+      return res.status(401).json({
         success: false,
-        message: 'Invalid credentials'
+        message: 'Invalid username or password'
       });
     }
   } catch (error) {
-    res.status(500).json({ 
+    console.error('❌ Admin login error:', error);
+    return res.status(500).json({ 
       success: false, 
-      message: 'Server error'
+      message: 'Server error. Please try again.',
+      error: error.message
+    });
+  }
+});
+
+// Get all questions for admin panel - FIXED
+app.get('/api/admin/questions', async (req, res) => {
+  try {
+    const questions = await Question.find().sort({ createdAt: -1 });
+    return res.json({
+      success: true,
+      questions: questions.map(q => ({
+        _id: q._id,
+        category: q.category,
+        questionText: q.questionText,
+        options: q.options,
+        marks: q.marks || 1,
+        difficulty: q.difficulty || 'medium',
+        createdAt: q.createdAt
+      })),
+      count: questions.length
+    });
+  } catch (error) {
+    console.error('❌ Get questions error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch questions',
+      error: error.message
+    });
+  }
+});
+
+// Add question - FIXED with category limit check
+app.post('/api/admin/questions', async (req, res) => {
+  try {
+    const { category, questionText, options, marks, difficulty } = req.body;
+    
+    if (!category || !questionText || !options || options.length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide category, question text, and at least 2 options'
+      });
+    }
+    
+    const validOptions = options.filter(opt => opt.text && opt.text.trim() !== '');
+    if (validOptions.length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least 2 valid options are required'
+      });
+    }
+    
+    const hasCorrectOption = validOptions.some(opt => opt.isCorrect);
+    if (!hasCorrectOption) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one option must be marked as correct'
+      });
+    }
+    
+    // Check category marks limit (100 marks max per category)
+    const categoryQuestions = await Question.find({ category: category.toLowerCase() });
+    const currentMarks = categoryQuestions.reduce((sum, q) => sum + (q.marks || 1), 0);
+    const newMarks = marks || 1;
+    
+    if (currentMarks + newMarks > 100) {
+      const remaining = 100 - currentMarks;
+      return res.status(400).json({
+        success: false,
+        message: `Cannot add question. ${category.toUpperCase()} category already has ${currentMarks}/100 marks. Only ${remaining} marks remaining.`,
+        currentMarks,
+        remainingMarks: remaining
+      });
+    }
+    
+    const question = new Question({
+      category: category.toLowerCase(),
+      questionText,
+      options: validOptions,
+      marks: newMarks,
+      difficulty: difficulty || 'medium'
+    });
+    
+    await question.save();
+    
+    return res.status(201).json({
+      success: true,
+      message: '✅ Question added successfully!',
+      question: {
+        _id: question._id,
+        category: question.category,
+        questionText: question.questionText,
+        options: question.options,
+        marks: question.marks,
+        difficulty: question.difficulty
+      },
+      categoryStatus: {
+        currentMarks: currentMarks + newMarks,
+        remaining: 100 - (currentMarks + newMarks),
+        isReady: (currentMarks + newMarks) >= 100
+      }
+    });
+  } catch (error) {
+    console.error('❌ Add question error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to add question',
+      error: error.message
+    });
+  }
+});
+
+// Delete question
+app.delete('/api/admin/questions/:id', async (req, res) => {
+  try {
+    const question = await Question.findByIdAndDelete(req.params.id);
+    if (!question) {
+      return res.status(404).json({
+        success: false,
+        message: 'Question not found'
+      });
+    }
+    
+    return res.json({
+      success: true,
+      message: '✅ Question deleted successfully'
+    });
+  } catch (error) {
+    console.error('❌ Delete question error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to delete question',
+      error: error.message
+    });
+  }
+});
+
+// Get all results for admin panel
+app.get('/api/admin/results', async (req, res) => {
+  try {
+    const users = await User.find().sort({ submittedAt: -1 });
+    return res.json({
+      success: true,
+      results: users.map(user => ({
+        _id: user._id,
+        name: user.name,
+        rollNumber: user.rollNumber,
+        category: user.category,
+        score: user.score,
+        percentage: user.percentage,
+        marksObtained: user.marksObtained || 0,
+        totalMarks: user.totalMarks || 100,
+        passed: user.passed,
+        createdAt: user.createdAt,
+        submittedAt: user.submittedAt
+      })),
+      count: users.length
+    });
+  } catch (error) {
+    console.error('❌ Get results error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch results',
+      error: error.message
+    });
+  }
+});
+
+// Get dashboard stats for admin panel
+app.get('/api/admin/dashboard', async (req, res) => {
+  try {
+    const totalStudents = await User.countDocuments();
+    const totalQuestions = await Question.countDocuments();
+    const users = await User.find();
+    
+    const passedStudents = users.filter(user => user.passed).length;
+    const totalPercentage = users.reduce((sum, user) => sum + (user.percentage || 0), 0);
+    const averageScore = totalStudents > 0 ? (totalPercentage / totalStudents).toFixed(2) : 0;
+    const passRate = totalStudents > 0 ? ((passedStudents / totalStudents) * 100).toFixed(2) : 0;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayAttempts = await User.countDocuments({
+      createdAt: { $gte: today }
+    });
+    
+    // Get category stats
+    const categories = ['html', 'css', 'javascript', 'react', 'mern', 'node', 'mongodb', 'express'];
+    const categoryStats = {};
+    const categoryMarks = {};
+    
+    for (const category of categories) {
+      const questionsInCategory = await Question.find({ category });
+      const attemptsInCategory = await User.countDocuments({ category });
+      
+      const totalMarks = questionsInCategory.reduce((sum, q) => sum + (q.marks || 1), 0);
+      
+      categoryStats[category] = {
+        questions: questionsInCategory.length,
+        attempts: attemptsInCategory,
+        totalMarks: totalMarks,
+        isReady: totalMarks >= 100,
+        percentage: (totalMarks / 100) * 100,
+        remaining: 100 - totalMarks
+      };
+      
+      categoryMarks[category] = totalMarks;
+    }
+    
+    // Recent activity
+    const recentActivity = await User.find()
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .select('name rollNumber category score percentage passed createdAt');
+    
+    return res.json({
+      success: true,
+      stats: {
+        totalStudents,
+        totalQuestions,
+        totalAttempts: totalStudents,
+        averageScore: parseFloat(averageScore),
+        passRate: parseFloat(passRate),
+        todayAttempts,
+        passedStudents,
+        failedStudents: totalStudents - passedStudents
+      },
+      categoryStats,
+      categoryMarks,
+      recentActivity
+    });
+  } catch (error) {
+    console.error('❌ Dashboard stats error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to get dashboard stats',
+      error: error.message
     });
   }
 });
@@ -145,7 +437,8 @@ app.get('/api/config', async (req, res) => {
       config = new Config();
       await config.save();
     }
-    res.json({
+    
+    return res.json({
       success: true,
       config: {
         quizTime: config.quizTime,
@@ -155,9 +448,11 @@ app.get('/api/config', async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ 
+    console.error('Get config error:', error);
+    return res.status(500).json({ 
       success: false, 
-      message: 'Failed to fetch config'
+      message: 'Failed to fetch config',
+      error: error.message
     });
   }
 });
@@ -175,15 +470,15 @@ app.put('/api/config', async (req, res) => {
         totalQuestions 
       });
     } else {
-      config.quizTime = quizTime || config.quizTime;
-      config.passingPercentage = passingPercentage || config.passingPercentage;
-      config.totalQuestions = totalQuestions || config.totalQuestions;
+      if (quizTime !== undefined) config.quizTime = quizTime;
+      if (passingPercentage !== undefined) config.passingPercentage = passingPercentage;
+      if (totalQuestions !== undefined) config.totalQuestions = totalQuestions;
       config.updatedAt = new Date();
     }
     
     await config.save();
     
-    res.json({
+    return res.json({
       success: true,
       message: 'Configuration updated successfully',
       config: {
@@ -194,9 +489,11 @@ app.put('/api/config', async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ 
+    console.error('Update config error:', error);
+    return res.status(500).json({ 
       success: false, 
-      message: 'Failed to update config'
+      message: 'Failed to update config',
+      error: error.message
     });
   }
 });
@@ -204,27 +501,34 @@ app.put('/api/config', async (req, res) => {
 // Get Categories
 app.get('/api/categories', async (req, res) => {
   try {
-    const categories = ['html', 'css', 'javascript', 'react', 'mern'];
+    const categories = ['html', 'css', 'javascript', 'react', 'mern', 'node', 'mongodb', 'express'];
     const categoryInfo = [];
     
     for (const category of categories) {
-      const questionCount = await Question.countDocuments({ category });
+      const questions = await Question.find({ category });
+      const totalMarks = questions.reduce((sum, q) => sum + (q.marks || 1), 0);
+      
       categoryInfo.push({
         value: category,
         label: category.toUpperCase(),
-        questionCount,
-        isReady: questionCount >= 3
+        questionCount: questions.length,
+        totalMarks: totalMarks,
+        isReady: totalMarks >= 100,
+        percentage: (totalMarks / 100) * 100,
+        remaining: 100 - totalMarks
       });
     }
     
-    res.json({
+    return res.json({
       success: true,
       categories: categoryInfo
     });
   } catch (error) {
-    res.status(500).json({ 
+    console.error('Get categories error:', error);
+    return res.status(500).json({ 
       success: false, 
-      message: 'Failed to fetch categories'
+      message: 'Failed to fetch categories',
+      error: error.message
     });
   }
 });
@@ -249,6 +553,17 @@ app.post('/api/auth/register', async (req, res) => {
       });
     }
     
+    // Check if category has enough questions (at least 100 marks worth)
+    const categoryQuestions = await Question.find({ category: category.toLowerCase() });
+    const totalMarks = categoryQuestions.reduce((sum, q) => sum + (q.marks || 1), 0);
+    
+    if (totalMarks < 100) {
+      return res.status(400).json({
+        success: false,
+        message: `The ${category.toUpperCase()} category is not yet available for quizzes. It needs 100 total marks worth of questions (currently ${totalMarks}/100).`
+      });
+    }
+    
     const user = new User({
       name,
       rollNumber,
@@ -258,7 +573,7 @@ app.post('/api/auth/register', async (req, res) => {
     
     await user.save();
     
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: 'Registration successful!',
       user: {
@@ -270,9 +585,19 @@ app.post('/api/auth/register', async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ 
+    console.error('Registration error:', error);
+    
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Roll number already exists'
+      });
+    }
+    
+    return res.status(500).json({ 
       success: false, 
-      message: 'Registration failed'
+      message: 'Registration failed',
+      error: error.message
     });
   }
 });
@@ -287,39 +612,19 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
     
     const allQuestions = await Question.find({ category: category.toLowerCase() });
     
-    // If no questions in DB, return sample questions
     if (allQuestions.length === 0) {
-      const sampleQuestions = [
-        {
-          _id: '1',
-          questionText: `Sample ${category.toUpperCase()} Question 1`,
-          options: [
-            { text: 'Option A' },
-            { text: 'Option B' },
-            { text: 'Option C' },
-            { text: 'Option D' }
-          ],
-          marks: 10
-        },
-        {
-          _id: '2',
-          questionText: `Sample ${category.toUpperCase()} Question 2`,
-          options: [
-            { text: 'Option A' },
-            { text: 'Option B' },
-            { text: 'Option C' },
-            { text: 'Option D' }
-          ],
-          marks: 10
-        }
-      ];
-      
-      return res.json({
-        success: true,
-        questions: sampleQuestions,
-        category: category,
-        totalQuestions: sampleQuestions.length,
-        totalMarks: 20
+      return res.status(404).json({
+        success: false,
+        message: `No questions found for ${category} category`
+      });
+    }
+    
+    // Check if category is ready (has at least 100 marks)
+    const totalMarks = allQuestions.reduce((sum, q) => sum + (q.marks || 1), 0);
+    if (totalMarks < 100) {
+      return res.status(400).json({
+        success: false,
+        message: `The ${category.toUpperCase()} category is not yet available for quizzes. It needs 100 total marks worth of questions (currently ${totalMarks}/100).`
       });
     }
     
@@ -333,10 +638,10 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
       options: question.options.map(opt => ({
         text: opt.text,
       })),
-      marks: question.marks
+      marks: question.marks || 1
     }));
     
-    res.json({
+    return res.json({
       success: true,
       questions: questionsForQuiz,
       category: category,
@@ -344,9 +649,11 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
       totalMarks: questionsForQuiz.reduce((sum, q) => sum + (q.marks || 1), 0)
     });
   } catch (error) {
-    res.status(500).json({ 
+    console.error('Get quiz questions error:', error);
+    return res.status(500).json({ 
       success: false, 
-      message: 'Failed to fetch quiz questions'
+      message: 'Failed to fetch quiz questions',
+      error: error.message
     });
   }
 });
@@ -355,6 +662,13 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
 app.post('/api/quiz/submit', async (req, res) => {
   try {
     const { rollNumber, answers } = req.body;
+    
+    if (!rollNumber || !answers) {
+      return res.status(400).json({
+        success: false,
+        message: 'Roll number and answers are required'
+      });
+    }
     
     const user = await User.findOne({ rollNumber });
     if (!user) {
@@ -371,7 +685,6 @@ app.post('/api/quiz/submit', async (req, res) => {
       });
     }
     
-    // Calculate score
     let score = 0;
     let totalMarks = 0;
     
@@ -402,10 +715,11 @@ app.post('/api/quiz/submit', async (req, res) => {
     
     await user.save();
     
-    res.json({
+    return res.json({
       success: true,
       message: 'Quiz submitted successfully',
       result: {
+        _id: user._id,
         name: user.name,
         rollNumber: user.rollNumber,
         category: user.category,
@@ -418,142 +732,16 @@ app.post('/api/quiz/submit', async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ 
+    console.error('Submit quiz error:', error);
+    return res.status(500).json({ 
       success: false, 
-      message: 'Failed to submit quiz'
+      message: 'Failed to submit quiz',
+      error: error.message
     });
   }
 });
 
-// ==================== ADMIN ROUTES ====================
-
-// Get All Questions (Admin)
-app.get('/api/admin/questions', async (req, res) => {
-  try {
-    const questions = await Question.find().sort({ createdAt: -1 });
-    res.json({
-      success: true,
-      questions,
-      count: questions.length
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to fetch questions'
-    });
-  }
-});
-
-// Add Question (Admin)
-app.post('/api/admin/questions', async (req, res) => {
-  try {
-    const { category, questionText, options, marks, difficulty } = req.body;
-    
-    if (!category || !questionText || !options || options.length < 2) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide category, question text, and at least 2 options'
-      });
-    }
-    
-    const hasCorrectOption = options.some(opt => opt.isCorrect);
-    if (!hasCorrectOption) {
-      return res.status(400).json({
-        success: false,
-        message: 'At least one option must be marked as correct'
-      });
-    }
-    
-    const question = new Question({
-      category: category.toLowerCase(),
-      questionText,
-      options,
-      marks: marks || 1,
-      difficulty: difficulty || 'medium'
-    });
-    
-    await question.save();
-    
-    res.status(201).json({
-      success: true,
-      message: 'Question added successfully',
-      question
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to add question'
-    });
-  }
-});
-
-// Delete Question (Admin)
-app.delete('/api/admin/questions/:id', async (req, res) => {
-  try {
-    const question = await Question.findByIdAndDelete(req.params.id);
-    if (!question) {
-      return res.status(404).json({
-        success: false,
-        message: 'Question not found'
-      });
-    }
-    
-    res.json({
-      success: true,
-      message: 'Question deleted successfully'
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to delete question'
-    });
-  }
-});
-
-// Delete All Questions (Admin)
-app.delete('/api/admin/questions', async (req, res) => {
-  try {
-    const { confirm } = req.query;
-    
-    if (confirm !== 'true') {
-      return res.status(400).json({
-        success: false,
-        message: 'Please confirm by adding ?confirm=true to the URL'
-      });
-    }
-    
-    const result = await Question.deleteMany({});
-    
-    res.json({
-      success: true,
-      message: `All questions (${result.deletedCount}) deleted successfully`
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to delete all questions'
-    });
-  }
-});
-
-// Get All Results (Admin)
-app.get('/api/admin/results', async (req, res) => {
-  try {
-    const users = await User.find().sort({ submittedAt: -1 });
-    res.json({
-      success: true,
-      results: users,
-      count: users.length
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to fetch results'
-    });
-  }
-});
-
-// Delete Result (Admin)
+// Delete result
 app.delete('/api/admin/results/:id', async (req, res) => {
   try {
     const result = await User.findByIdAndDelete(req.params.id);
@@ -564,19 +752,21 @@ app.delete('/api/admin/results/:id', async (req, res) => {
       });
     }
     
-    res.json({
+    return res.json({
       success: true,
       message: 'Result deleted successfully'
     });
   } catch (error) {
-    res.status(500).json({ 
+    console.error('Delete result error:', error);
+    return res.status(500).json({ 
       success: false, 
-      message: 'Failed to delete result'
+      message: 'Failed to delete result',
+      error: error.message
     });
   }
 });
 
-// Delete All Results (Admin)
+// Delete all results
 app.delete('/api/admin/results', async (req, res) => {
   try {
     const { confirm } = req.query;
@@ -590,61 +780,108 @@ app.delete('/api/admin/results', async (req, res) => {
     
     const result = await User.deleteMany({});
     
-    res.json({
+    return res.json({
       success: true,
       message: `All results (${result.deletedCount}) deleted successfully`
     });
   } catch (error) {
-    res.status(500).json({ 
+    console.error('Delete all results error:', error);
+    return res.status(500).json({ 
       success: false, 
-      message: 'Failed to delete all results'
+      message: 'Failed to delete all results',
+      error: error.message
     });
   }
 });
 
-// Get Dashboard Stats
-app.get('/api/admin/dashboard', async (req, res) => {
+// Delete all questions
+app.delete('/api/admin/questions', async (req, res) => {
   try {
-    const totalStudents = await User.countDocuments();
-    const totalQuestions = await Question.countDocuments();
-    const users = await User.find();
+    const { confirm } = req.query;
     
-    const passedStudents = users.filter(user => user.passed).length;
-    const totalPercentage = users.reduce((sum, user) => sum + (user.percentage || 0), 0);
-    const averageScore = totalStudents > 0 ? (totalPercentage / totalStudents).toFixed(2) : 0;
-    const passRate = totalStudents > 0 ? ((passedStudents / totalStudents) * 100).toFixed(2) : 0;
-    
-    const categories = ['html', 'css', 'javascript', 'react', 'mern'];
-    const categoryStats = [];
-    
-    for (const category of categories) {
-      const questionsInCategory = await Question.countDocuments({ category });
-      const attemptsInCategory = await User.countDocuments({ category });
-      categoryStats.push({
-        category,
-        questions: questionsInCategory,
-        attempts: attemptsInCategory
+    if (confirm !== 'true') {
+      return res.status(400).json({
+        success: false,
+        message: 'Please confirm by adding ?confirm=true to the URL'
       });
     }
     
-    res.json({
+    const result = await Question.deleteMany({});
+    
+    return res.json({
       success: true,
-      stats: {
-        totalStudents,
-        totalQuestions,
-        totalAttempts: totalStudents,
-        averageScore: parseFloat(averageScore),
-        passRate: parseFloat(passRate),
-        todayAttempts: 0,
-        passedStudents,
-        failedStudents: totalStudents - passedStudents
-      },
-      categoryStats
+      message: `All questions (${result.deletedCount}) deleted successfully`
     });
   } catch (error) {
-    res.status(500).json({ 
+    console.error('Delete all questions error:', error);
+    return res.status(500).json({ 
       success: false, 
-      message: 'Failed to get dashboard stats'
+      message: 'Failed to delete all questions',
+      error: error.message
+    });
+  }
+});
+
+// Get user by roll number
+app.get('/api/user/:rollNumber', async (req, res) => {
+  try {
+    const user = await User.findOne({ rollNumber: req.params.rollNumber });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+    
+    return res.json({
+      success: true,
+      user
+    });
+  } catch (error) {
+    console.error('Get user error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch user',
+      error: error.message
+    });
+  }
+});
+
+// Test endpoint
+app.get('/api/test/data', async (req, res) => {
+  try {
+    const userCount = await User.countDocuments();
+    const questionCount = await Question.countDocuments();
+    const adminCount = await Admin.countDocuments();
+    const configCount = await Config.countDocuments();
+    
+    const sampleUsers = await User.find().limit(5);
+    const sampleQuestions = await Question.find().limit(5);
+    const admins = await Admin.find();
+    
+    return res.json({
+      success: true,
+      counts: {
+        users: userCount,
+        questions: questionCount,
+        admins: adminCount,
+        configs: configCount
+      },
+      admins: admins.map(a => ({
+        username: a.username,
+        password: a.password,
+        email: a.email
+      })),
+      sampleUsers,
+      sampleQuestions,
+      mongodbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
+    });
+  } catch (error) {
+    console.error('Test data error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get test data',
+      error: error.message
     });
   }
 });
@@ -655,6 +892,8 @@ app.get('/', (req, res) => {
     success: true,
     message: 'Shamsi Institute Quiz System API',
     version: '1.0.0',
+    timestamp: new Date().toISOString(),
+    database: mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌',
     endpoints: {
       health: '/api/health',
       admin: {
@@ -667,10 +906,35 @@ app.get('/', (req, res) => {
         categories: '/api/categories',
         register: '/api/auth/register',
         questions: '/api/quiz/questions/:category',
-        submit: '/api/quiz/submit'
+        submit: '/api/quiz/submit',
+        user: '/api/user/:rollNumber'
       },
-      config: '/api/config'
+      config: '/api/config',
+      test: '/api/test/data'
     }
+  });
+});
+
+app.use('/api/*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'API endpoint not found'
+  });
+});
+
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Endpoint not found. Use /api for API endpoints.'
+  });
+});
+
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({
+    success: false,
+    message: 'Internal server error',
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
 
