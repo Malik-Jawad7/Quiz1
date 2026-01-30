@@ -1,4 +1,5 @@
-﻿const express = require('express');
+﻿// server.js
+const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 
@@ -55,12 +56,12 @@ const QuestionSchema = new mongoose.Schema({
 const ConfigSchema = new mongoose.Schema({
   quizTime: { type: Number, default: 30 },
   passingPercentage: { type: Number, default: 40 },
-  totalQuestions: { type: Number, default: 50 },
+  totalQuestions: { type: Number, default: 100 },
   updatedAt: { type: Date, default: Date.now }
 });
 
 const AdminSchema = new mongoose.Schema({
-  username: { type: String, default: 'admin' },
+  username: { type: String, unique: true, default: 'admin' },
   password: { type: String, default: 'admin123' },
   email: { type: String, default: 'admin@shamsi.edu.pk' }
 });
@@ -104,9 +105,57 @@ const initializeDefaultData = async () => {
       console.log('✅ Config already exists');
     }
 
+    // Add sample questions if no questions exist
+    const questionCount = await Question.countDocuments();
+    if (questionCount === 0) {
+      console.log('Adding sample questions...');
+      await addSampleQuestions();
+    }
+
     console.log('📊 Database initialization complete!');
   } catch (error) {
     console.error('❌ Error initializing data:', error.message);
+  }
+};
+
+// Add sample questions
+const addSampleQuestions = async () => {
+  const sampleQuestions = [
+    {
+      category: 'mern',
+      questionText: 'What does MERN stand for?',
+      options: [
+        { text: 'MongoDB, Express, React, Node.js', isCorrect: true },
+        { text: 'MySQL, Express, React, Node.js', isCorrect: false },
+        { text: 'MongoDB, Express, Redux, Node.js', isCorrect: false },
+        { text: 'MongoDB, Express, Ruby, Node.js', isCorrect: false }
+      ],
+      marks: 1,
+      difficulty: 'easy'
+    },
+    {
+      category: 'mern',
+      questionText: 'Which of the following is NOT part of MERN stack?',
+      options: [
+        { text: 'MongoDB', isCorrect: false },
+        { text: 'Express.js', isCorrect: false },
+        { text: 'React', isCorrect: false },
+        { text: 'Python', isCorrect: true }
+      ],
+      marks: 1,
+      difficulty: 'easy'
+    },
+    // Add more sample questions to reach 100 marks...
+  ];
+
+  try {
+    for (const question of sampleQuestions) {
+      const newQuestion = new Question(question);
+      await newQuestion.save();
+    }
+    console.log(`✅ Added ${sampleQuestions.length} sample questions`);
+  } catch (error) {
+    console.error('Error adding sample questions:', error);
   }
 };
 
@@ -129,12 +178,12 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Admin Login - FIXED with better debugging
+// Admin Login - FIXED
 app.post('/api/admin/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     
-    console.log('🔐 Admin login attempt:', { username, password });
+    console.log('🔐 Admin login attempt:', { username });
     
     if (!username || !password) {
       return res.status(400).json({
@@ -143,10 +192,8 @@ app.post('/api/admin/login', async (req, res) => {
       });
     }
     
-    // Find admin with case-insensitive username
-    const admin = await Admin.findOne({ 
-      username: { $regex: new RegExp(`^${username}$`, 'i') }
-    });
+    // Find admin with exact username (case-sensitive)
+    const admin = await Admin.findOne({ username: username });
     
     if (!admin) {
       console.log('❌ Admin not found for username:', username);
@@ -157,13 +204,11 @@ app.post('/api/admin/login', async (req, res) => {
     }
     
     console.log('✅ Admin found:', {
-      id: admin._id,
-      dbUsername: admin.username,
-      dbPassword: admin.password,
-      inputPassword: password
+      username: admin.username,
+      passwordMatch: admin.password === password
     });
     
-    // Compare passwords (case-sensitive)
+    // Compare passwords (exact match)
     if (admin.password === password) {
       console.log('✅ Password matches! Login successful');
       
@@ -193,7 +238,51 @@ app.post('/api/admin/login', async (req, res) => {
   }
 });
 
-// Get all questions for admin panel - FIXED
+// 🔧 NEW: FORCE RESET ADMIN PASSWORD (Emergency fix)
+app.post('/api/admin/force-reset', async (req, res) => {
+  try {
+    const { username, newPassword } = req.body;
+    
+    console.log('🛠️ Force reset for admin:', username);
+    
+    // Find and update or create admin
+    let admin = await Admin.findOne({ username: username });
+    
+    if (!admin) {
+      // Create new admin
+      admin = new Admin({
+        username: username,
+        password: newPassword,
+        email: 'admin@shamsi.edu.pk'
+      });
+      console.log('✅ Created new admin');
+    } else {
+      // Update existing admin
+      admin.password = newPassword;
+      console.log('✅ Updated existing admin password');
+    }
+    
+    await admin.save();
+    
+    return res.json({
+      success: true,
+      message: '✅ Admin credentials updated successfully!',
+      credentials: {
+        username: admin.username,
+        password: admin.password
+      }
+    });
+  } catch (error) {
+    console.error('Force reset error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to reset admin',
+      error: error.message
+    });
+  }
+});
+
+// Get all questions for admin panel
 app.get('/api/admin/questions', async (req, res) => {
   try {
     const questions = await Question.find().sort({ createdAt: -1 });
@@ -220,7 +309,7 @@ app.get('/api/admin/questions', async (req, res) => {
   }
 });
 
-// Add question - FIXED with category limit check
+// Add question
 app.post('/api/admin/questions', async (req, res) => {
   try {
     const { category, questionText, options, marks, difficulty } = req.body;
@@ -847,7 +936,7 @@ app.get('/api/user/:rollNumber', async (req, res) => {
   }
 });
 
-// Test endpoint
+// Test endpoint - FIXED to show admin details
 app.get('/api/test/data', async (req, res) => {
   try {
     const userCount = await User.countDocuments();
@@ -898,6 +987,7 @@ app.get('/', (req, res) => {
       health: '/api/health',
       admin: {
         login: '/api/admin/login',
+        forceReset: '/api/admin/force-reset',
         dashboard: '/api/admin/dashboard',
         questions: '/api/admin/questions',
         results: '/api/admin/results'
@@ -915,6 +1005,7 @@ app.get('/', (req, res) => {
   });
 });
 
+// Handle 404
 app.use('/api/*', (req, res) => {
   res.status(404).json({
     success: false,
@@ -929,6 +1020,7 @@ app.use('*', (req, res) => {
   });
 });
 
+// Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({
@@ -946,6 +1038,7 @@ app.listen(PORT, () => {
   📡 API Base URL: http://localhost:${PORT}/api
   🔗 Health Check: http://localhost:${PORT}/api/health
   👨‍💼 Admin Login: admin / admin123
+  🔧 Force Reset: POST /api/admin/force-reset
   📊 MongoDB Status: ${mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌'}
   `);
 });
