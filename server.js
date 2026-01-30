@@ -1,20 +1,13 @@
-﻿// server.js (اپڈیٹڈ ورژن)
+﻿// server.js - COMPLETE FIXED VERSION
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-require('dotenv').config(); // Add this line
 
 const app = express();
 
-// CORS Configuration - Add all your Vercel domains
+// CORS Configuration
 app.use(cors({
-  origin: [
-    'https://quiz2-iota-one.vercel.app',
-    'https://quiz2-fyvu2hgzw-khalids-projects-3de9ee65.vercel.app',
-    'https://quiz2-git-main-khalids-projects-3de9ee65.vercel.app',
-    'http://localhost:5173',
-    'http://localhost:3000'
-  ],
+  origin: ['https://quiz2-iota-one.vercel.app', 'http://localhost:5173'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -22,48 +15,43 @@ app.use(cors({
 
 app.use(express.json());
 
-// MongoDB Connection - Vercel compatible
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
+// FIXED MongoDB Connection
+const MONGODB_URI = 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority&appName=Cluster0';
 
-// Improved MongoDB connection with better options
-const mongooseOptions = {
+console.log('🔗 Connecting to MongoDB...');
+
+mongoose.connect(MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
-  socketTimeoutMS: 45000, // Close sockets after 45s of inactivity
-  family: 4 // Use IPv4, skip trying IPv6
-};
-
-console.log('🔗 Attempting MongoDB connection...');
-console.log('MongoDB URI:', MONGODB_URI.replace(/:[^:]*@/, ':****@')); // Hide password
-
-mongoose.connect(MONGODB_URI, mongooseOptions)
+  serverSelectionTimeoutMS: 50000,
+  socketTimeoutMS: 45000,
+  connectTimeoutMS: 30000
+})
 .then(() => {
   console.log('✅ MongoDB Connected Successfully!');
-  console.log('📊 Database Name:', mongoose.connection.db?.databaseName || 'Unknown');
-  console.log('🔌 Connection State:', mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected');
-  
+  console.log('📊 Database:', mongoose.connection.name);
   initializeDefaultData();
 })
 .catch(err => {
   console.error('❌ MongoDB Connection Error:', err.message);
-  console.log('💡 Tips: Check if MongoDB Atlas has IP whitelist enabled (0.0.0.0/0)');
+  console.log('💡 Connection URI:', MONGODB_URI);
+  console.log('🛠️ Make sure IP is whitelisted in MongoDB Atlas');
 });
 
-// Database connection status check
+// Event listeners for connection
 mongoose.connection.on('connected', () => {
-  console.log('✅ Mongoose connected to MongoDB');
+  console.log('✅ Mongoose connected to DB');
 });
 
 mongoose.connection.on('error', (err) => {
-  console.error('❌ Mongoose connection error:', err.message);
+  console.error('❌ Mongoose connection error:', err);
 });
 
 mongoose.connection.on('disconnected', () => {
-  console.log('⚠️ Mongoose disconnected from MongoDB');
+  console.log('⚠️ Mongoose disconnected');
 });
 
-// Schemas (same as before)
+// Schemas
 const UserSchema = new mongoose.Schema({
   name: String,
   rollNumber: { type: String, unique: true },
@@ -107,12 +95,11 @@ const Admin = mongoose.model('Admin', AdminSchema);
 // Initialize default data
 const initializeDefaultData = async () => {
   try {
-    console.log('📊 Initializing database with default data...');
+    console.log('📊 Initializing default data...');
     
-    // Check and create default admin if not exists
+    // Check and create default admin
     let admin = await Admin.findOne({ username: 'admin' });
     if (!admin) {
-      console.log('Creating default admin...');
       admin = new Admin({
         username: 'admin',
         password: 'admin123',
@@ -122,12 +109,6 @@ const initializeDefaultData = async () => {
       console.log('✅ Default admin created');
     } else {
       console.log('✅ Admin already exists');
-      // Ensure password is correct
-      if (admin.password !== 'admin123') {
-        admin.password = 'admin123';
-        await admin.save();
-        console.log('✅ Admin password updated to admin123');
-      }
     }
 
     // Default config
@@ -136,24 +117,69 @@ const initializeDefaultData = async () => {
       config = new Config();
       await config.save();
       console.log('✅ Default config created');
-    } else {
-      console.log('✅ Config already exists');
     }
 
-    console.log('📊 Database initialization complete!');
+    // Add sample questions if none exist
+    const questionCount = await Question.countDocuments();
+    if (questionCount === 0) {
+      console.log('➕ Adding sample questions...');
+      await addSampleQuestions();
+    }
+
+    console.log('✅ Database initialization complete!');
   } catch (error) {
     console.error('❌ Error initializing data:', error.message);
   }
 };
 
+// Add sample questions
+const addSampleQuestions = async () => {
+  const sampleQuestions = [
+    {
+      category: 'mern',
+      questionText: 'What does MERN stand for?',
+      options: [
+        { text: 'MongoDB, Express, React, Node.js', isCorrect: true },
+        { text: 'MySQL, Express, React, Node.js', isCorrect: false },
+        { text: 'MongoDB, Express, Redux, Node.js', isCorrect: false },
+        { text: 'MongoDB, Express, Ruby, Node.js', isCorrect: false }
+      ],
+      marks: 1,
+      difficulty: 'easy'
+    },
+    {
+      category: 'react',
+      questionText: 'What is JSX?',
+      options: [
+        { text: 'JavaScript XML', isCorrect: true },
+        { text: 'Java Syntax Extension', isCorrect: false },
+        { text: 'JavaScript Extension', isCorrect: false },
+        { text: 'Java XML', isCorrect: false }
+      ],
+      marks: 1,
+      difficulty: 'easy'
+    }
+  ];
+
+  try {
+    for (const question of sampleQuestions) {
+      const newQuestion = new Question(question);
+      await newQuestion.save();
+    }
+    console.log(`✅ Added ${sampleQuestions.length} sample questions`);
+  } catch (error) {
+    console.error('Error adding sample questions:', error);
+  }
+};
+
 // ==================== API ROUTES ====================
 
-// Health Check - IMPROVED
+// Health Check
 app.get('/api/health', (req, res) => {
-  const dbStatus = mongoose.connection.readyState;
+  const dbState = mongoose.connection.readyState;
   let dbMessage = 'Unknown';
   
-  switch(dbStatus) {
+  switch(dbState) {
     case 0: dbMessage = 'Disconnected ❌'; break;
     case 1: dbMessage = 'Connected ✅'; break;
     case 2: dbMessage = 'Connecting 🔄'; break;
@@ -162,127 +188,61 @@ app.get('/api/health', (req, res) => {
   
   res.json({
     success: true,
-    message: 'Shamsi Institute Quiz System API - LIVE ✅',
+    message: 'Shamsi Institute Quiz System API',
     timestamp: new Date().toISOString(),
     database: dbMessage,
-    mongodbState: dbStatus,
-    server: 'Vercel Production',
-    environment: process.env.NODE_ENV || 'development',
-    version: '2.0.0'
+    mongodbState: dbState,
+    server: 'Vercel',
+    version: '2.0.0',
+    endpoints: {
+      admin: '/api/admin/login',
+      quiz: '/api/auth/register',
+      config: '/api/config',
+      setup: '/api/setup-admin'
+    }
   });
 });
 
-// Test Connection Endpoint
+// Test Connection
 app.get('/api/test', async (req, res) => {
   try {
     const adminCount = await Admin.countDocuments();
     const questionCount = await Question.countDocuments();
-    const userCount = await User.countDocuments();
-    const configCount = await Config.countDocuments();
     
     res.json({
       success: true,
-      message: 'Test successful',
+      message: 'Connection test successful',
       counts: {
         admins: adminCount,
-        questions: questionCount,
-        users: userCount,
-        configs: configCount
+        questions: questionCount
       },
       database: mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌',
-      serverTime: new Date().toISOString(),
-      environment: process.env.NODE_ENV || 'development'
+      timestamp: new Date().toISOString()
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Test failed',
+      message: 'Connection test failed',
       error: error.message,
       database: mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌'
     });
   }
 });
 
-// Admin Login - SIMPLIFIED AND FIXED
-app.post('/api/admin/login', async (req, res) => {
+// Setup Admin (Force create/update)
+app.get('/api/setup-admin', async (req, res) => {
   try {
-    const { username, password } = req.body;
-    
-    console.log('🔐 Admin login attempt for:', username);
-    
-    if (!username || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Username and password are required'
-      });
-    }
-    
-    // Find admin (case-insensitive search)
-    const admin = await Admin.findOne({ 
-      username: { $regex: new RegExp('^' + username + '$', 'i') } 
-    });
-    
-    if (!admin) {
-      console.log('❌ Admin not found:', username);
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid username or password'
-      });
-    }
-    
-    // Simple password check
-    if (admin.password === password) {
-      console.log('✅ Login successful for:', username);
-      
-      return res.json({
-        success: true,
-        message: 'Login successful',
-        user: { 
-          username: admin.username, 
-          role: 'admin',
-          email: admin.email 
-        }
-      });
-    } else {
-      console.log('❌ Password mismatch for:', username);
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid username or password'
-      });
-    }
-  } catch (error) {
-    console.error('❌ Admin login error:', error);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Server error. Please try again.'
-    });
-  }
-});
-
-// Reset/Create Admin (For emergency use)
-app.post('/api/admin/setup', async (req, res) => {
-  try {
-    const { username, password, email } = req.body;
-    
-    if (!username || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Username and password are required'
-      });
-    }
-    
-    // Check if admin exists
-    let admin = await Admin.findOne({ username });
+    let admin = await Admin.findOne({ username: 'admin' });
     
     if (admin) {
-      // Update existing admin
-      admin.password = password;
-      admin.email = email || 'admin@shamsi.edu.pk';
+      // Update existing
+      admin.password = 'admin123';
+      admin.email = 'admin@shamsi.edu.pk';
       await admin.save();
       
-      return res.json({
+      res.json({
         success: true,
-        message: 'Admin credentials updated successfully',
+        message: 'Admin updated successfully',
         action: 'updated',
         admin: {
           username: admin.username,
@@ -290,15 +250,15 @@ app.post('/api/admin/setup', async (req, res) => {
         }
       });
     } else {
-      // Create new admin
+      // Create new
       admin = new Admin({
-        username,
-        password,
-        email: email || 'admin@shamsi.edu.pk'
+        username: 'admin',
+        password: 'admin123',
+        email: 'admin@shamsi.edu.pk'
       });
       await admin.save();
       
-      return res.json({
+      res.json({
         success: true,
         message: 'Admin created successfully',
         action: 'created',
@@ -309,279 +269,64 @@ app.post('/api/admin/setup', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Setup error:', error);
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
       message: 'Setup failed',
-      error: error.message
+      error: error.message,
+      database: mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌'
     });
   }
 });
 
-// Get all questions
-app.get('/api/admin/questions', async (req, res) => {
+// Admin Login - SIMPLIFIED
+app.post('/api/admin/login', async (req, res) => {
   try {
-    const questions = await Question.find().sort({ createdAt: -1 });
-    return res.json({
-      success: true,
-      questions: questions.map(q => ({
-        _id: q._id,
-        category: q.category,
-        questionText: q.questionText,
-        options: q.options,
-        marks: q.marks || 1,
-        difficulty: q.difficulty || 'medium',
-        createdAt: q.createdAt
-      })),
-      count: questions.length
-    });
-  } catch (error) {
-    console.error('Get questions error:', error);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Failed to fetch questions'
-    });
-  }
-});
-
-// Add question
-app.post('/api/admin/questions', async (req, res) => {
-  try {
-    const { category, questionText, options, marks, difficulty } = req.body;
+    const { username, password } = req.body;
     
-    if (!category || !questionText || !options || options.length < 2) {
+    console.log('Login attempt:', username);
+    
+    if (!username || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide category, question text, and at least 2 options'
+        message: 'Username and password required'
       });
     }
     
-    const validOptions = options.filter(opt => opt.text && opt.text.trim() !== '');
-    if (validOptions.length < 2) {
-      return res.status(400).json({
+    const admin = await Admin.findOne({ username });
+    
+    if (!admin) {
+      return res.status(401).json({
         success: false,
-        message: 'At least 2 valid options are required'
+        message: 'Invalid credentials'
       });
     }
     
-    const hasCorrectOption = validOptions.some(opt => opt.isCorrect);
-    if (!hasCorrectOption) {
-      return res.status(400).json({
-        success: false,
-        message: 'At least one option must be marked as correct'
-      });
-    }
-    
-    const question = new Question({
-      category: category.toLowerCase(),
-      questionText,
-      options: validOptions,
-      marks: marks || 1,
-      difficulty: difficulty || 'medium'
-    });
-    
-    await question.save();
-    
-    return res.status(201).json({
-      success: true,
-      message: '✅ Question added successfully!',
-      question: {
-        _id: question._id,
-        category: question.category,
-        questionText: question.questionText,
-        options: question.options,
-        marks: question.marks,
-        difficulty: question.difficulty
-      }
-    });
-  } catch (error) {
-    console.error('Add question error:', error);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Failed to add question'
-    });
-  }
-});
-
-// Get all results
-app.get('/api/admin/results', async (req, res) => {
-  try {
-    const users = await User.find().sort({ submittedAt: -1 });
-    return res.json({
-      success: true,
-      results: users.map(user => ({
-        _id: user._id,
-        name: user.name,
-        rollNumber: user.rollNumber,
-        category: user.category,
-        score: user.score,
-        percentage: user.percentage,
-        marksObtained: user.marksObtained || 0,
-        totalMarks: user.totalMarks || 100,
-        passed: user.passed,
-        createdAt: user.createdAt,
-        submittedAt: user.submittedAt
-      })),
-      count: users.length
-    });
-  } catch (error) {
-    console.error('Get results error:', error);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Failed to fetch results'
-    });
-  }
-});
-
-// Get dashboard stats
-app.get('/api/admin/dashboard', async (req, res) => {
-  try {
-    const totalStudents = await User.countDocuments();
-    const totalQuestions = await Question.countDocuments();
-    const users = await User.find();
-    
-    const passedStudents = users.filter(user => user.passed).length;
-    const totalPercentage = users.reduce((sum, user) => sum + (user.percentage || 0), 0);
-    const averageScore = totalStudents > 0 ? (totalPercentage / totalStudents).toFixed(2) : 0;
-    const passRate = totalStudents > 0 ? ((passedStudents / totalStudents) * 100).toFixed(2) : 0;
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayAttempts = await User.countDocuments({
-      createdAt: { $gte: today }
-    });
-    
-    // Recent activity
-    const recentActivity = await User.find()
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .select('name rollNumber category score percentage passed createdAt');
-    
-    return res.json({
-      success: true,
-      stats: {
-        totalStudents,
-        totalQuestions,
-        totalAttempts: totalStudents,
-        averageScore: parseFloat(averageScore),
-        passRate: parseFloat(passRate),
-        todayAttempts,
-        passedStudents,
-        failedStudents: totalStudents - passedStudents
-      },
-      recentActivity
-    });
-  } catch (error) {
-    console.error('Dashboard stats error:', error);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Failed to get dashboard stats'
-    });
-  }
-});
-
-// Get Config
-app.get('/api/config', async (req, res) => {
-  try {
-    let config = await Config.findOne();
-    if (!config) {
-      config = new Config();
-      await config.save();
-    }
-    
-    return res.json({
-      success: true,
-      config: {
-        quizTime: config.quizTime,
-        passingPercentage: config.passingPercentage,
-        totalQuestions: config.totalQuestions,
-        updatedAt: config.updatedAt
-      }
-    });
-  } catch (error) {
-    console.error('Get config error:', error);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Failed to fetch config'
-    });
-  }
-});
-
-// Update Config
-app.put('/api/config', async (req, res) => {
-  try {
-    const { quizTime, passingPercentage, totalQuestions } = req.body;
-    
-    let config = await Config.findOne();
-    if (!config) {
-      config = new Config({ 
-        quizTime, 
-        passingPercentage, 
-        totalQuestions 
+    if (admin.password === password) {
+      res.json({
+        success: true,
+        message: 'Login successful',
+        user: {
+          username: admin.username,
+          email: admin.email,
+          role: 'admin'
+        }
       });
     } else {
-      if (quizTime !== undefined) config.quizTime = quizTime;
-      if (passingPercentage !== undefined) config.passingPercentage = passingPercentage;
-      if (totalQuestions !== undefined) config.totalQuestions = totalQuestions;
-      config.updatedAt = new Date();
-    }
-    
-    await config.save();
-    
-    return res.json({
-      success: true,
-      message: 'Configuration updated successfully',
-      config: {
-        quizTime: config.quizTime,
-        passingPercentage: config.passingPercentage,
-        totalQuestions: config.totalQuestions,
-        updatedAt: config.updatedAt
-      }
-    });
-  } catch (error) {
-    console.error('Update config error:', error);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Failed to update config'
-    });
-  }
-});
-
-// Get Categories
-app.get('/api/categories', async (req, res) => {
-  try {
-    const categories = ['html', 'css', 'javascript', 'react', 'nextjs', 'vue', 'angular', 'node', 'express', 'python', 'django', 'flask', 'java', 'spring', 'php', 'laravel', 'mern', 'mongodb', 'mysql', 'postgresql', 'git', 'docker', 'aws', 'typescript', 'graphql'];
-    const categoryInfo = [];
-    
-    for (const category of categories) {
-      const questions = await Question.find({ category });
-      const totalMarks = questions.reduce((sum, q) => sum + (q.marks || 1), 0);
-      
-      categoryInfo.push({
-        value: category,
-        label: category.toUpperCase(),
-        questionCount: questions.length,
-        totalMarks: totalMarks,
-        isReady: totalMarks >= 100,
-        percentage: (totalMarks / 100) * 100,
-        remaining: 100 - totalMarks
+      res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
       });
     }
-    
-    return res.json({
-      success: true,
-      categories: categoryInfo
-    });
   } catch (error) {
-    console.error('Get categories error:', error);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Failed to fetch categories'
+    console.error('Login error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error during login'
     });
   }
 });
 
-// User Registration
+// User Registration - SIMPLIFIED
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { name, rollNumber, category } = req.body;
@@ -589,12 +334,13 @@ app.post('/api/auth/register', async (req, res) => {
     if (!name || !rollNumber || !category) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide name, roll number, and category'
+        message: 'All fields are required'
       });
     }
     
-    const existingUser = await User.findOne({ rollNumber });
-    if (existingUser) {
+    // Check if user already exists
+    const existing = await User.findOne({ rollNumber });
+    if (existing) {
       return res.status(400).json({
         success: false,
         message: 'Roll number already registered'
@@ -610,11 +356,10 @@ app.post('/api/auth/register', async (req, res) => {
     
     await user.save();
     
-    return res.status(201).json({
+    res.status(201).json({
       success: true,
-      message: 'Registration successful!',
+      message: 'Registration successful',
       user: {
-        _id: user._id,
         name: user.name,
         rollNumber: user.rollNumber,
         category: user.category,
@@ -623,63 +368,100 @@ app.post('/api/auth/register', async (req, res) => {
     });
   } catch (error) {
     console.error('Registration error:', error);
-    
-    if (error.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: 'Roll number already exists'
-      });
-    }
-    
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Registration failed'
+    res.status(500).json({
+      success: false,
+      message: 'Registration failed. Please try again.'
     });
   }
 });
 
-// Get Quiz Questions
+// Get Categories
+app.get('/api/categories', async (req, res) => {
+  try {
+    const categories = ['html', 'css', 'javascript', 'react', 'nextjs', 'node', 'express', 'python', 'java', 'php', 'mern', 'mongodb'];
+    
+    const categoryInfo = await Promise.all(categories.map(async (cat) => {
+      const questions = await Question.find({ category: cat });
+      const totalMarks = questions.reduce((sum, q) => sum + (q.marks || 1), 0);
+      
+      return {
+        value: cat,
+        label: cat.toUpperCase(),
+        questionCount: questions.length,
+        totalMarks: totalMarks,
+        isReady: totalMarks >= 100
+      };
+    }));
+    
+    res.json({
+      success: true,
+      categories: categoryInfo
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch categories'
+    });
+  }
+});
+
+// Get Config
+app.get('/api/config', async (req, res) => {
+  try {
+    let config = await Config.findOne();
+    if (!config) {
+      config = new Config();
+      await config.save();
+    }
+    
+    res.json({
+      success: true,
+      config: {
+        quizTime: config.quizTime,
+        passingPercentage: config.passingPercentage,
+        totalQuestions: config.totalQuestions
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch config'
+    });
+  }
+});
+
+// Get Questions
 app.get('/api/quiz/questions/:category', async (req, res) => {
   try {
     const { category } = req.params;
     
-    const config = await Config.findOne();
-    const totalQuestions = config ? config.totalQuestions : 10;
+    const questions = await Question.find({ category: category.toLowerCase() }).limit(10);
     
-    const allQuestions = await Question.find({ category: category.toLowerCase() });
-    
-    if (allQuestions.length === 0) {
+    if (questions.length === 0) {
       return res.status(404).json({
         success: false,
-        message: `No questions found for ${category} category`
+        message: 'No questions found for this category'
       });
     }
     
-    const shuffledQuestions = [...allQuestions]
-      .sort(() => Math.random() - 0.5)
-      .slice(0, Math.min(totalQuestions, allQuestions.length));
+    // Shuffle and limit to 10 questions
+    const shuffled = questions.sort(() => 0.5 - Math.random()).slice(0, 10);
     
-    const questionsForQuiz = shuffledQuestions.map(question => ({
-      _id: question._id,
-      questionText: question.questionText,
-      options: question.options.map(opt => ({
-        text: opt.text,
-      })),
-      marks: question.marks || 1
-    }));
-    
-    return res.json({
+    res.json({
       success: true,
-      questions: questionsForQuiz,
-      category: category,
-      totalQuestions: questionsForQuiz.length,
-      totalMarks: questionsForQuiz.reduce((sum, q) => sum + (q.marks || 1), 0)
+      questions: shuffled.map(q => ({
+        _id: q._id,
+        questionText: q.questionText,
+        options: q.options,
+        marks: q.marks || 1
+      })),
+      count: shuffled.length,
+      category: category
     });
   } catch (error) {
-    console.error('Get quiz questions error:', error);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Failed to fetch quiz questions'
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch questions'
     });
   }
 });
@@ -692,7 +474,7 @@ app.post('/api/quiz/submit', async (req, res) => {
     if (!rollNumber || !answers) {
       return res.status(400).json({
         success: false,
-        message: 'Roll number and answers are required'
+        message: 'Roll number and answers required'
       });
     }
     
@@ -711,6 +493,7 @@ app.post('/api/quiz/submit', async (req, res) => {
       });
     }
     
+    // Calculate score
     let score = 0;
     let totalMarks = 0;
     
@@ -718,7 +501,6 @@ app.post('/api/quiz/submit', async (req, res) => {
       const question = await Question.findById(answer.questionId);
       if (question) {
         totalMarks += question.marks || 1;
-        
         const correctOption = question.options.find(opt => opt.isCorrect);
         if (correctOption && correctOption.text === answer.selectedOption) {
           score += question.marks || 1;
@@ -727,135 +509,140 @@ app.post('/api/quiz/submit', async (req, res) => {
     }
     
     const percentage = totalMarks > 0 ? (score / totalMarks) * 100 : 0;
-    
     const config = await Config.findOne();
     const passingPercentage = config ? config.passingPercentage : 40;
     const passed = percentage >= passingPercentage;
     
+    // Update user
     user.score = score;
-    user.marksObtained = score;
-    user.totalMarks = totalMarks;
-    user.percentage = parseFloat(percentage.toFixed(2));
+    user.percentage = percentage;
     user.passed = passed;
     user.submittedAt = new Date();
     
     await user.save();
     
-    return res.json({
+    res.json({
       success: true,
       message: 'Quiz submitted successfully',
       result: {
-        _id: user._id,
         name: user.name,
         rollNumber: user.rollNumber,
-        category: user.category,
         score: score,
-        totalMarks: totalMarks,
-        percentage: user.percentage,
+        percentage: percentage.toFixed(2),
         passed: passed,
-        submittedAt: user.submittedAt,
-        createdAt: user.createdAt
+        submittedAt: user.submittedAt
       }
     });
   } catch (error) {
-    console.error('Submit quiz error:', error);
-    return res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: 'Failed to submit quiz'
     });
   }
 });
 
-// Quick Admin Setup Route (For Vercel deployment)
-app.get('/api/setup-admin', async (req, res) => {
+// Admin Dashboard - Get all results
+app.get('/api/admin/results', async (req, res) => {
   try {
-    const admin = await Admin.findOne({ username: 'admin' });
+    const results = await User.find().sort({ submittedAt: -1 });
     
-    if (admin) {
-      return res.json({
-        success: true,
-        message: 'Admin already exists',
-        admin: {
-          username: admin.username,
-          password: admin.password,
-          email: admin.email
-        }
-      });
-    } else {
-      // Create admin
-      const newAdmin = new Admin({
-        username: 'admin',
-        password: 'admin123',
-        email: 'admin@shamsi.edu.pk'
-      });
-      await newAdmin.save();
-      
-      return res.json({
-        success: true,
-        message: 'Admin created successfully',
-        admin: {
-          username: newAdmin.username,
-          password: newAdmin.password,
-          email: newAdmin.email
-        }
-      });
-    }
+    res.json({
+      success: true,
+      results: results.map(r => ({
+        _id: r._id,
+        name: r.name,
+        rollNumber: r.rollNumber,
+        category: r.category,
+        score: r.score,
+        percentage: r.percentage,
+        passed: r.passed,
+        submittedAt: r.submittedAt
+      })),
+      count: results.length
+    });
   } catch (error) {
-    console.error('Setup admin error:', error);
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
-      message: 'Setup failed',
-      error: error.message
+      message: 'Failed to fetch results'
     });
   }
 });
 
-// Root route
+// Admin Dashboard - Get all questions
+app.get('/api/admin/questions', async (req, res) => {
+  try {
+    const questions = await Question.find().sort({ createdAt: -1 });
+    
+    res.json({
+      success: true,
+      questions: questions.map(q => ({
+        _id: q._id,
+        category: q.category,
+        questionText: q.questionText,
+        options: q.options,
+        marks: q.marks || 1,
+        difficulty: q.difficulty || 'medium'
+      })),
+      count: questions.length
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch questions'
+    });
+  }
+});
+
+// Add question
+app.post('/api/admin/questions', async (req, res) => {
+  try {
+    const { category, questionText, options, marks, difficulty } = req.body;
+    
+    if (!category || !questionText || !options || options.length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields'
+      });
+    }
+    
+    const question = new Question({
+      category: category.toLowerCase(),
+      questionText,
+      options,
+      marks: marks || 1,
+      difficulty: difficulty || 'medium'
+    });
+    
+    await question.save();
+    
+    res.status(201).json({
+      success: true,
+      message: 'Question added successfully',
+      question: question
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to add question'
+    });
+  }
+});
+
+// Root endpoint
 app.get('/', (req, res) => {
   res.json({
     success: true,
     message: 'Shamsi Institute Quiz System API',
     version: '2.0.0',
-    timestamp: new Date().toISOString(),
-    database: mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌',
-    server: 'Vercel Production',
     status: 'Live',
+    database: mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌',
     endpoints: {
       health: '/api/health',
       test: '/api/test',
       setup: '/api/setup-admin',
-      admin: {
-        login: '/api/admin/login',
-        dashboard: '/api/admin/dashboard',
-        questions: '/api/admin/questions',
-        results: '/api/admin/results'
-      },
-      quiz: {
-        categories: '/api/categories',
-        register: '/api/auth/register',
-        questions: '/api/quiz/questions/:category',
-        submit: '/api/quiz/submit'
-      },
-      config: '/api/config'
+      login: '/api/admin/login',
+      register: '/api/auth/register'
     }
-  });
-});
-
-// Handle 404
-app.use('*', (req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'API endpoint not found. Check / for available endpoints.'
-  });
-});
-
-// Error handler
-app.use((err, req, res, next) => {
-  console.error('Server error:', err);
-  res.status(500).json({
-    success: false,
-    message: 'Internal server error',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
 
@@ -864,12 +651,10 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`
   🚀 Server running on port ${PORT}
-  📡 API Base URL: https://backend-one-taupe-14.vercel.app
-  🔗 Health Check: /api/health
-  👨‍💼 Admin Login: admin / admin123
-  🔧 Setup Admin: /api/setup-admin
-  📊 MongoDB Status: ${mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌'}
-  ⚙️ Environment: ${process.env.NODE_ENV || 'development'}
+  📡 API: https://backend-one-taupe-14.vercel.app
+  🔗 Health: /api/health
+  👨‍💼 Admin: admin / admin123
+  📊 Database: ${mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌'}
   `);
 });
 
