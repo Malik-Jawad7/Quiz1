@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
@@ -17,6 +18,9 @@ app.use(cors({
 
 app.use(express.json());
 
+// Serve static files from React build (for production)
+app.use(express.static(path.join(__dirname, '../client/dist')));
+
 // MongoDB Connection String
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
 
@@ -24,17 +28,15 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@c
 mongoose.connect(MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 5000, // Timeout after 5 seconds
-  socketTimeoutMS: 45000, // Close sockets after 45 seconds
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
 })
 .then(() => {
   console.log('✅ MongoDB Connected Successfully');
   console.log('📊 Database:', mongoose.connection.name);
-  console.log('🔗 Connection State:', mongoose.connection.readyState);
 })
 .catch(err => {
   console.error('❌ MongoDB Connection Error:', err.message);
-  console.log('📝 Attempting to use fallback database...');
 });
 
 // Connection events
@@ -44,16 +46,6 @@ mongoose.connection.on('connected', () => {
 
 mongoose.connection.on('error', (err) => {
   console.error('❌ MongoDB event error:', err.message);
-});
-
-mongoose.connection.on('disconnected', () => {
-  console.log('⚠️ MongoDB event disconnected');
-});
-
-// Close MongoDB connection on app termination
-process.on('SIGINT', async () => {
-  await mongoose.connection.close();
-  process.exit(0);
 });
 
 // MongoDB Models
@@ -106,7 +98,7 @@ const Admin = mongoose.model('Admin', AdminSchema);
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || 'shamsi_institute_secret_key_2024';
 
-// Simple mock data storage for development if MongoDB fails
+// Simple mock data storage
 let mockQuestions = [];
 let mockResults = [];
 let mockConfig = {
@@ -165,7 +157,6 @@ app.get('/api/health', async (req, res) => {
 // Setup Admin (First Time)
 app.get('/api/setup-admin', async (req, res) => {
   try {
-    // If MongoDB is connected, use it
     if (isMongoDBConnected()) {
       const adminExists = await Admin.findOne({ username: 'admin' });
       
@@ -203,8 +194,6 @@ app.get('/api/setup-admin', async (req, res) => {
         database: 'MongoDB'
       });
     } else {
-      // Use mock data if MongoDB is not connected
-      console.log('⚠️ Using mock admin setup');
       res.json({
         success: true,
         message: 'Admin setup successful (Development Mode)',
@@ -251,7 +240,6 @@ app.post('/api/admin/login', async (req, res) => {
       });
     }
     
-    // If MongoDB is connected, try to authenticate from database
     if (isMongoDBConnected()) {
       const admin = await Admin.findOne({ username });
       if (!admin) {
@@ -287,7 +275,6 @@ app.post('/api/admin/login', async (req, res) => {
       });
     }
     
-    // Default fallback
     return res.status(401).json({
       success: false,
       message: 'Invalid credentials'
@@ -321,7 +308,6 @@ app.get('/api/admin/dashboard', authMiddleware, async (req, res) => {
       today.setHours(0, 0, 0, 0);
       const todayAttempts = await User.countDocuments({ submittedAt: { $gte: today } });
       
-      // Get config
       let config = await Config.findOne();
       if (!config) {
         config = new Config();
@@ -343,7 +329,6 @@ app.get('/api/admin/dashboard', authMiddleware, async (req, res) => {
         database: 'MongoDB'
       });
     } else {
-      // Mock data for development
       res.json({
         success: true,
         stats: {
@@ -382,7 +367,6 @@ app.get('/api/admin/questions', authMiddleware, async (req, res) => {
         database: 'MongoDB'
       });
     } else {
-      // Mock questions
       if (mockQuestions.length === 0) {
         mockQuestions = [
           {
@@ -430,7 +414,6 @@ app.post('/api/admin/questions', authMiddleware, async (req, res) => {
       });
     }
     
-    // Check if at least one option is correct
     const hasCorrect = options.some(opt => opt.isCorrect);
     if (!hasCorrect) {
       return res.status(400).json({
@@ -440,7 +423,6 @@ app.post('/api/admin/questions', authMiddleware, async (req, res) => {
     }
     
     if (isMongoDBConnected()) {
-      // Check category marks limit (100 per category)
       const existingQuestions = await Question.find({ category });
       const currentTotalMarks = existingQuestions.reduce((sum, q) => sum + (q.marks || 1), 0);
       const newQuestionMarks = marks || 1;
@@ -453,7 +435,6 @@ app.post('/api/admin/questions', authMiddleware, async (req, res) => {
         });
       }
       
-      // Create new question in MongoDB
       const question = new Question({
         category: category.toLowerCase(),
         questionText: questionText.trim(),
@@ -467,8 +448,6 @@ app.post('/api/admin/questions', authMiddleware, async (req, res) => {
       
       await question.save();
       
-      console.log('✅ Question saved to MongoDB');
-      
       res.status(201).json({
         success: true,
         message: 'Question added successfully to MongoDB',
@@ -476,7 +455,6 @@ app.post('/api/admin/questions', authMiddleware, async (req, res) => {
         database: 'MongoDB'
       });
     } else {
-      // Save to mock data
       const newQuestion = {
         _id: Date.now().toString(),
         category: category.toLowerCase(),
@@ -491,8 +469,6 @@ app.post('/api/admin/questions', authMiddleware, async (req, res) => {
       };
       
       mockQuestions.push(newQuestion);
-      
-      console.log('📝 Question saved to mock data');
       
       res.status(201).json({
         success: true,
@@ -533,7 +509,6 @@ app.delete('/api/admin/questions/:id', authMiddleware, async (req, res) => {
         database: 'MongoDB'
       });
     } else {
-      // Delete from mock data
       const index = mockQuestions.findIndex(q => q._id === id);
       if (index === -1) {
         return res.status(404).json({
@@ -573,7 +548,6 @@ app.get('/api/admin/results', authMiddleware, async (req, res) => {
         database: 'MongoDB'
       });
     } else {
-      // Mock results
       if (mockResults.length === 0) {
         mockResults = [
           {
@@ -608,8 +582,6 @@ app.get('/api/admin/results', authMiddleware, async (req, res) => {
   }
 });
 
-// ============ ADDED DELETE ROUTES FOR RESULTS ============
-
 // Delete Single Result
 app.delete('/api/admin/results/:id', authMiddleware, async (req, res) => {
   try {
@@ -632,7 +604,6 @@ app.delete('/api/admin/results/:id', authMiddleware, async (req, res) => {
         database: 'MongoDB'
       });
     } else {
-      // Delete from mock data
       const index = mockResults.findIndex(r => r._id === id);
       if (index === -1) {
         return res.status(404).json({
@@ -693,7 +664,7 @@ app.delete('/api/admin/results', authMiddleware, async (req, res) => {
   }
 });
 
-// Alternative POST endpoint for delete all (if DELETE method doesn't work)
+// Alternative POST endpoint for delete all
 app.post('/api/admin/results/delete-all', authMiddleware, async (req, res) => {
   try {
     if (isMongoDBConnected()) {
@@ -748,7 +719,6 @@ app.get('/api/config', async (req, res) => {
         database: 'MongoDB'
       });
     } else {
-      // Mock config
       res.json({
         success: true,
         config: mockConfig,
@@ -799,7 +769,6 @@ app.put('/api/config', authMiddleware, async (req, res) => {
         database: 'MongoDB'
       });
     } else {
-      // Update mock config
       mockConfig = {
         quizTime: quizTime || mockConfig.quizTime,
         passingPercentage: passingPercentage || mockConfig.passingPercentage,
@@ -854,7 +823,6 @@ app.get('/api/categories', async (req, res) => {
         database: 'MongoDB'
       });
     } else {
-      // Mock categories
       const categoryInfo = categories.map(category => ({
         value: category,
         label: category.toUpperCase(),
@@ -891,7 +859,6 @@ app.post('/api/auth/register', async (req, res) => {
     }
     
     if (isMongoDBConnected()) {
-      // Check if user already exists
       const existingUser = await User.findOne({ rollNumber });
       if (existingUser) {
         return res.status(400).json({
@@ -920,7 +887,6 @@ app.post('/api/auth/register', async (req, res) => {
         database: 'MongoDB'
       });
     } else {
-      // Mock registration
       const user = {
         _id: Date.now().toString(),
         name,
@@ -951,7 +917,6 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
     const { category } = req.params;
     
     if (isMongoDBConnected()) {
-      // Get all questions for category
       const questions = await Question.find({ category });
       
       if (questions.length === 0) {
@@ -961,15 +926,12 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
         });
       }
       
-      // Get config for quiz settings
       const config = await Config.findOne();
       
-      // Shuffle questions and limit
       const shuffledQuestions = questions
         .sort(() => Math.random() - 0.5)
         .slice(0, config?.totalQuestions || 50);
       
-      // Don't send correct answers
       const quizQuestions = shuffledQuestions.map(q => ({
         _id: q._id,
         questionText: q.questionText,
@@ -987,11 +949,9 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
         database: 'MongoDB'
       });
     } else {
-      // Mock quiz questions
       const categoryQuestions = mockQuestions.filter(q => q.category === category);
       
       if (categoryQuestions.length === 0) {
-        // Create some mock questions if none exist
         categoryQuestions.push({
           _id: '1',
           questionText: `Sample ${category} question 1`,
@@ -1044,7 +1004,6 @@ app.post('/api/quiz/submit', async (req, res) => {
     }
     
     if (isMongoDBConnected()) {
-      // Find or create user
       let user = await User.findOne({ rollNumber });
       if (!user) {
         user = new User({
@@ -1054,11 +1013,9 @@ app.post('/api/quiz/submit', async (req, res) => {
         });
       }
       
-      // Get config
       const config = await Config.findOne();
       const passingPercentage = config?.passingPercentage || 40;
       
-      // Calculate score
       let score = 0;
       let totalMarks = 0;
       let correctAnswers = 0;
@@ -1079,7 +1036,6 @@ app.post('/api/quiz/submit', async (req, res) => {
       const percentage = totalMarks > 0 ? (score / totalMarks) * 100 : 0;
       const passed = percentage >= passingPercentage;
       
-      // Update user in MongoDB
       user.score = score;
       user.percentage = percentage;
       user.marksObtained = score;
@@ -1112,8 +1068,7 @@ app.post('/api/quiz/submit', async (req, res) => {
         database: 'MongoDB'
       });
     } else {
-      // Mock quiz submission
-      const score = Math.floor(Math.random() * 20) + 60; // Random score 60-80
+      const score = Math.floor(Math.random() * 20) + 60;
       const totalMarks = 100;
       const percentage = score;
       const passed = percentage >= mockConfig.passingPercentage;
@@ -1180,7 +1135,6 @@ app.get('/api/category-stats', authMiddleware, async (req, res) => {
         database: 'MongoDB'
       });
     } else {
-      // Mock category stats
       for (const category of categories) {
         const questions = mockQuestions.filter(q => q.category === category);
         const totalMarks = questions.reduce((sum, q) => sum + (q.marks || 1), 0);
@@ -1228,6 +1182,21 @@ app.get('/api/mongodb-status', (req, res) => {
     stateName: stateNames[state] || 'Unknown',
     connectionString: MONGODB_URI ? 'Set' : 'Not set',
     timestamp: new Date().toISOString()
+  });
+});
+
+// Home route
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Welcome to Shamsi Institute Quiz System API',
+    endpoints: {
+      api: '/api/health',
+      adminLogin: 'POST /api/admin/login',
+      studentQuiz: 'GET /api/quiz/questions/:category',
+      documentation: 'Visit /api-docs for API documentation'
+    },
+    version: '1.0.0'
   });
 });
 
