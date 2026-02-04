@@ -313,7 +313,7 @@ app.get('/admin/login', (req, res) => {
     success: true,
     message: 'Admin Login API',
     instructions: 'This is a POST endpoint. Use POST method to login.',
-    endpoint: 'POST /admin/login',
+    endpoint: 'POST /api/admin/login',
     test_credentials: {
       username: 'admin',
       password: 'admin123'
@@ -334,10 +334,12 @@ app.get('/api/admin/login', (req, res) => {
   });
 });
 
-// ✅ POST route for admin login
+// ✅ POST route for admin login - ADD THIS ROUTE
 app.post('/admin/login', async (req, res) => {
   try {
     const { username, password } = req.body;
+    
+    console.log('🔐 Admin login attempt:', username);
     
     // Development fallback for testing
     if (username === 'admin' && password === 'admin123') {
@@ -415,6 +417,8 @@ app.post('/api/admin/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     
+    console.log('🔐 API Admin login attempt:', username);
+    
     // Development fallback for testing
     if (username === 'admin' && password === 'admin123') {
       const token = jwt.sign(
@@ -485,7 +489,7 @@ app.post('/api/admin/login', async (req, res) => {
   }
 });
 
-// ✅ REGISTER USER ENDPOINT - ADD THIS
+// ✅ REGISTER USER ENDPOINT
 app.post('/api/register', async (req, res) => {
   try {
     const { name, rollNumber, category } = req.body;
@@ -776,7 +780,7 @@ app.delete('/api/admin/results', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ GET CONFIG - FIXED
+// ✅ GET CONFIG
 app.get('/api/config', async (req, res) => {
   try {
     const config = await Config.findOne() || {
@@ -837,7 +841,7 @@ app.put('/api/config', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ GET CATEGORIES - FIXED
+// ✅ GET CATEGORIES
 app.get('/api/categories', async (req, res) => {
   try {
     const categories = await Question.distinct('category');
@@ -868,7 +872,7 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-// ✅ GET QUIZ QUESTIONS - FIXED
+// ✅ GET QUIZ QUESTIONS
 app.get('/api/quiz/questions/:category', async (req, res) => {
   try {
     const { category } = req.params;
@@ -914,7 +918,7 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
   }
 });
 
-// ✅ SUBMIT QUIZ - FIXED
+// ✅ SUBMIT QUIZ
 app.post('/api/quiz/submit', async (req, res) => {
   try {
     const { rollNumber, name, category, score, percentage, totalQuestions, correctAnswers } = req.body;
@@ -954,7 +958,7 @@ app.post('/api/quiz/submit', async (req, res) => {
   }
 });
 
-// ✅ GET REGISTRATIONS (for admin) - ADD THIS
+// ✅ GET REGISTRATIONS (for admin)
 app.get('/api/admin/registrations', verifyToken, async (req, res) => {
   try {
     const registrations = await Registration.find().sort({ registeredAt: -1 });
@@ -975,7 +979,7 @@ app.get('/api/admin/registrations', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ INIT DATABASE (for testing) - ADD THIS
+// ✅ INIT DATABASE (for testing)
 app.get('/api/init-db', async (req, res) => {
   try {
     await initializeDatabase();
