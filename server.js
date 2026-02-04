@@ -112,12 +112,96 @@ async function initializeDatabase() {
       console.log('✅ Default config created');
     }
 
-    // Add sample questions for testing if no questions exist
+    // Add sample questions for testing
     const questionCount = await Question.countDocuments();
     if (questionCount === 0) {
       console.log('📝 Creating sample questions for testing...');
       
       const sampleQuestions = [
+        // HTML Questions
+        {
+          category: 'html',
+          questionText: 'What does HTML stand for?',
+          options: [
+            { text: 'Hyper Text Markup Language', isCorrect: true },
+            { text: 'High Tech Modern Language', isCorrect: false },
+            { text: 'Hyper Transfer Markup Language', isCorrect: false },
+            { text: 'Home Tool Markup Language', isCorrect: false }
+          ],
+          difficulty: 'easy'
+        },
+        {
+          category: 'html',
+          questionText: 'Which tag is used for the largest heading?',
+          options: [
+            { text: '<h6>', isCorrect: false },
+            { text: '<h1>', isCorrect: true },
+            { text: '<head>', isCorrect: false },
+            { text: '<header>', isCorrect: false }
+          ],
+          difficulty: 'easy'
+        },
+        {
+          category: 'html',
+          questionText: 'What is the correct HTML element for inserting a line break?',
+          options: [
+            { text: '<break>', isCorrect: false },
+            { text: '<lb>', isCorrect: false },
+            { text: '<br>', isCorrect: true },
+            { text: '<line>', isCorrect: false }
+          ],
+          difficulty: 'easy'
+        },
+        
+        // CSS Questions
+        {
+          category: 'css',
+          questionText: 'What does CSS stand for?',
+          options: [
+            { text: 'Creative Style Sheets', isCorrect: false },
+            { text: 'Cascading Style Sheets', isCorrect: true },
+            { text: 'Computer Style Sheets', isCorrect: false },
+            { text: 'Colorful Style Sheets', isCorrect: false }
+          ],
+          difficulty: 'easy'
+        },
+        {
+          category: 'css',
+          questionText: 'Which property is used to change the background color?',
+          options: [
+            { text: 'color', isCorrect: false },
+            { text: 'bgcolor', isCorrect: false },
+            { text: 'background-color', isCorrect: true },
+            { text: 'bg-color', isCorrect: false }
+          ],
+          difficulty: 'easy'
+        },
+        
+        // JavaScript Questions
+        {
+          category: 'javascript',
+          questionText: 'Which company developed JavaScript?',
+          options: [
+            { text: 'Microsoft', isCorrect: false },
+            { text: 'Netscape', isCorrect: true },
+            { text: 'Google', isCorrect: false },
+            { text: 'Apple', isCorrect: false }
+          ],
+          difficulty: 'easy'
+        },
+        {
+          category: 'javascript',
+          questionText: 'How do you write "Hello World" in an alert box?',
+          options: [
+            { text: 'alertBox("Hello World")', isCorrect: false },
+            { text: 'msg("Hello World")', isCorrect: false },
+            { text: 'alert("Hello World")', isCorrect: true },
+            { text: 'msgBox("Hello World")', isCorrect: false }
+          ],
+          difficulty: 'easy'
+        },
+        
+        // React Questions
         {
           category: 'react',
           questionText: 'What is React?',
@@ -140,17 +224,8 @@ async function initializeDatabase() {
           ],
           difficulty: 'easy'
         },
-        {
-          category: 'javascript',
-          questionText: 'What is closure in JavaScript?',
-          options: [
-            { text: 'A function with access to its outer function scope', isCorrect: true },
-            { text: 'A way to close browser tabs', isCorrect: false },
-            { text: 'A type of loop', isCorrect: false },
-            { text: 'A database connection', isCorrect: false }
-          ],
-          difficulty: 'medium'
-        },
+        
+        // Node.js Questions
         {
           category: 'node',
           questionText: 'What is Node.js?',
@@ -165,7 +240,7 @@ async function initializeDatabase() {
       ];
       
       await Question.insertMany(sampleQuestions);
-      console.log('✅ Created sample questions for react, javascript, and node categories');
+      console.log('✅ Created sample questions for html, css, javascript, react, and node categories');
     }
 
     console.log('✅ Database initialization complete');
@@ -216,7 +291,8 @@ app.get('/', (req, res) => {
       adminLogin: 'POST /api/admin/login',
       quizQuestions: 'GET /api/quiz/questions/:category',
       submitQuiz: 'POST /api/quiz/submit',
-      config: 'GET /api/config'
+      config: 'GET /api/config',
+      categories: 'GET /api/categories'
     }
   });
 });
@@ -231,100 +307,65 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// ✅ REGISTER USER - NEW ENDPOINT
-app.post('/api/register', async (req, res) => {
-  try {
-    const { name, rollNumber, category } = req.body;
-    
-    console.log('Registration attempt:', { name, rollNumber, category });
-    
-    if (!name || !rollNumber || !category) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide name, roll number, and category'
-      });
+// ✅ GET route for login page (for browser testing)
+app.get('/admin/login', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Admin Login API',
+    instructions: 'This is a POST endpoint. Use POST method to login.',
+    endpoint: 'POST /admin/login',
+    test_credentials: {
+      username: 'admin',
+      password: 'admin123'
     }
-    
-    // Check if roll number already registered today
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const existingRegistration = await Registration.findOne({
-      rollNumber,
-      registeredAt: { $gte: today }
-    });
-    
-    if (existingRegistration) {
-      return res.status(400).json({
-        success: false,
-        message: 'This roll number is already registered today'
-      });
-    }
-    
-    // Save registration
-    const registration = new Registration({
-      name,
-      rollNumber,
-      category
-    });
-    
-    await registration.save();
-    
-    res.json({
-      success: true,
-      message: 'Registration successful',
-      data: {
-        name,
-        rollNumber,
-        category,
-        registeredAt: registration.registeredAt
-      }
-    });
-    
-  } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Registration failed',
-      error: error.message
-    });
-  }
+  });
 });
 
-// ✅ ADMIN LOGIN
-app.post('/api/admin/login', async (req, res) => {
+app.get('/api/admin/login', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Admin Login API',
+    instructions: 'This is a POST endpoint. Use POST method to login.',
+    endpoint: 'POST /api/admin/login',
+    test_credentials: {
+      username: 'admin',
+      password: 'admin123'
+    }
+  });
+});
+
+// ✅ POST route for admin login
+app.post('/admin/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     
-    console.log('Login attempt:', { username });
+    // Development fallback for testing
+    if (username === 'admin' && password === 'admin123') {
+      const token = jwt.sign(
+        { 
+          id: 'dev_admin_id', 
+          username: 'admin', 
+          role: 'superadmin'
+        },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+      
+      return res.json({
+        success: true,
+        message: 'Login successful',
+        token,
+        user: {
+          username: 'admin',
+          role: 'superadmin'
+        }
+      });
+    }
     
     // Check in database
     const admin = await Admin.findOne({ username });
     
     if (!admin) {
-      // Development fallback for testing
-      if (username === 'admin' && password === 'admin123') {
-        const token = jwt.sign(
-          { 
-            id: 'dev_admin_id', 
-            username: 'admin', 
-            role: 'superadmin'
-          },
-          JWT_SECRET,
-          { expiresIn: '24h' }
-        );
-        
-        return res.json({
-          success: true,
-          message: 'Login successful (Development Mode)',
-          token,
-          user: {
-            username: 'admin',
-            role: 'superadmin'
-          }
-        });
-      }
-      
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -369,13 +410,145 @@ app.post('/api/admin/login', async (req, res) => {
   }
 });
 
-// ✅ GET DASHBOARD STATS
+// Also keep the API route for consistency
+app.post('/api/admin/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    // Development fallback for testing
+    if (username === 'admin' && password === 'admin123') {
+      const token = jwt.sign(
+        { 
+          id: 'dev_admin_id', 
+          username: 'admin', 
+          role: 'superadmin'
+        },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+      
+      return res.json({
+        success: true,
+        message: 'Login successful',
+        token,
+        user: {
+          username: 'admin',
+          role: 'superadmin'
+        }
+      });
+    }
+    
+    const admin = await Admin.findOne({ username });
+    
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+    
+    const validPassword = await bcrypt.compare(password, admin.password);
+    if (!validPassword) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+    
+    const token = jwt.sign(
+      { 
+        id: admin._id, 
+        username: admin.username, 
+        role: admin.role
+      },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+    
+    res.json({
+      success: true,
+      message: 'Login successful',
+      token,
+      user: {
+        username: admin.username,
+        role: admin.role
+      }
+    });
+    
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
+
+// ✅ REGISTER USER ENDPOINT - ADD THIS
+app.post('/api/register', async (req, res) => {
+  try {
+    const { name, rollNumber, category } = req.body;
+    
+    console.log('📝 Registration attempt:', { name, rollNumber, category });
+    
+    if (!name || !rollNumber || !category) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide name, roll number, and category'
+      });
+    }
+    
+    // Check if category exists in questions
+    const questionCount = await Question.countDocuments({ category: category.toLowerCase() });
+    if (questionCount === 0) {
+      return res.status(400).json({
+        success: false,
+        message: `No questions available for "${category}" category. Please select a different category.`
+      });
+    }
+    
+    // Save registration (optional - you can skip this if you don't want to track registrations)
+    try {
+      const registration = new Registration({
+        name,
+        rollNumber,
+        category
+      });
+      await registration.save();
+    } catch (registrationError) {
+      console.log('Registration logging failed, continuing anyway:', registrationError.message);
+    }
+    
+    console.log('✅ Registration successful for:', name);
+    
+    res.json({
+      success: true,
+      message: 'Registration successful',
+      data: {
+        name,
+        rollNumber,
+        category,
+        registeredAt: new Date().toISOString()
+      }
+    });
+    
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Registration failed',
+      error: error.message
+    });
+  }
+});
+
+// Get dashboard stats
 app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
   try {
     const totalStudents = await User.countDocuments();
     const totalQuestions = await Question.countDocuments();
     const totalAttempts = await User.countDocuments({ submittedAt: { $ne: null } });
-    const totalRegistrations = await Registration.countDocuments();
     
     const results = await User.find({ submittedAt: { $ne: null } });
     let averageScore = 0;
@@ -395,10 +568,6 @@ app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
       submittedAt: { $gte: today } 
     });
     
-    const todayRegistrations = await Registration.countDocuments({ 
-      registeredAt: { $gte: today } 
-    });
-    
     const config = await Config.findOne() || { quizTime: 30, passingPercentage: 40, totalQuestions: 50 };
     
     res.json({
@@ -407,11 +576,9 @@ app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
         totalStudents,
         totalQuestions,
         totalAttempts,
-        totalRegistrations,
         averageScore: averageScore.toFixed(2),
         passRate: passRate.toFixed(2),
         todayAttempts,
-        todayRegistrations,
         quizTime: config.quizTime,
         passingPercentage: config.passingPercentage
       }
@@ -427,14 +594,14 @@ app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ GET ALL QUESTIONS
+// Get all questions
 app.get('/api/admin/questions', verifyToken, async (req, res) => {
   try {
     const { category, page = 1, limit = 100 } = req.query;
     
     let query = {};
     if (category && category !== 'all') {
-      query.category = category.toLowerCase();
+      query.category = category;
     }
     
     const skip = (page - 1) * limit;
@@ -463,12 +630,10 @@ app.get('/api/admin/questions', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ ADD QUESTION
+// Add question
 app.post('/api/admin/questions', verifyToken, async (req, res) => {
   try {
     const { category, questionText, options, marks, difficulty } = req.body;
-    
-    console.log('Adding question:', { category, questionText });
     
     if (!category || !questionText || !options || options.length < 2) {
       return res.status(400).json({
@@ -511,7 +676,7 @@ app.post('/api/admin/questions', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ DELETE QUESTION
+// Delete question
 app.delete('/api/admin/questions/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -540,7 +705,7 @@ app.delete('/api/admin/questions/:id', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ GET RESULTS
+// Get results
 app.get('/api/admin/results', verifyToken, async (req, res) => {
   try {
     const results = await User.find({ submittedAt: { $ne: null } })
@@ -562,7 +727,7 @@ app.get('/api/admin/results', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ DELETE RESULT
+// Delete result
 app.delete('/api/admin/results/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -591,7 +756,7 @@ app.delete('/api/admin/results/:id', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ DELETE ALL RESULTS
+// Delete all results
 app.delete('/api/admin/results', verifyToken, async (req, res) => {
   try {
     await User.deleteMany({ submittedAt: { $ne: null } });
@@ -611,7 +776,7 @@ app.delete('/api/admin/results', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ GET CONFIG
+// ✅ GET CONFIG - FIXED
 app.get('/api/config', async (req, res) => {
   try {
     const config = await Config.findOne() || {
@@ -635,7 +800,7 @@ app.get('/api/config', async (req, res) => {
   }
 });
 
-// ✅ UPDATE CONFIG
+// Update config
 app.put('/api/config', verifyToken, async (req, res) => {
   try {
     const { quizTime, passingPercentage, totalQuestions } = req.body;
@@ -672,7 +837,7 @@ app.put('/api/config', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ GET CATEGORIES
+// ✅ GET CATEGORIES - FIXED
 app.get('/api/categories', async (req, res) => {
   try {
     const categories = await Question.distinct('category');
@@ -683,37 +848,14 @@ app.get('/api/categories', async (req, res) => {
         return {
           value: category,
           label: category.charAt(0).toUpperCase() + category.slice(1),
-          questionCount: count,
-          type: category === 'react' || category === 'javascript' || category === 'html' || category === 'css' ? 'frontend' : 
-                category === 'node' || category === 'express' || category === 'python' ? 'backend' : 
-                category === 'mongodb' || category === 'mysql' ? 'database' : 'general'
+          questionCount: count
         };
       })
     );
     
-    // Add categories that might not have questions yet
-    const allCategories = [
-      ...categoriesWithCount,
-      { value: 'html', label: 'HTML', questionCount: 0, type: 'frontend' },
-      { value: 'css', label: 'CSS', questionCount: 0, type: 'frontend' },
-      { value: 'javascript', label: 'JavaScript', questionCount: 0, type: 'frontend' },
-      { value: 'react', label: 'React.js', questionCount: 0, type: 'frontend' },
-      { value: 'node', label: 'Node.js', questionCount: 0, type: 'backend' },
-      { value: 'express', label: 'Express.js', questionCount: 0, type: 'backend' },
-      { value: 'mongodb', label: 'MongoDB', questionCount: 0, type: 'database' },
-      { value: 'mysql', label: 'MySQL', questionCount: 0, type: 'database' },
-      { value: 'docker', label: 'Docker', questionCount: 0, type: 'devops' },
-      { value: 'git', label: 'Git', questionCount: 0, type: 'devops' }
-    ];
-    
-    // Remove duplicates
-    const uniqueCategories = allCategories.filter((cat, index, self) =>
-      index === self.findIndex((c) => c.value === cat.value)
-    );
-    
     res.json({
       success: true,
-      categories: uniqueCategories
+      categories: categoriesWithCount
     });
     
   } catch (error) {
@@ -726,12 +868,12 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-// ✅ GET QUIZ QUESTIONS
+// ✅ GET QUIZ QUESTIONS - FIXED
 app.get('/api/quiz/questions/:category', async (req, res) => {
   try {
     const { category } = req.params;
     
-    console.log('Fetching questions for category:', category);
+    console.log('📚 Fetching questions for category:', category);
     
     const questions = await Question.find({ category: category.toLowerCase() });
     
@@ -772,12 +914,12 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
   }
 });
 
-// ✅ SUBMIT QUIZ
+// ✅ SUBMIT QUIZ - FIXED
 app.post('/api/quiz/submit', async (req, res) => {
   try {
     const { rollNumber, name, category, score, percentage, totalQuestions, correctAnswers } = req.body;
     
-    console.log('Submitting quiz:', { name, rollNumber, category, score, percentage });
+    console.log('📊 Quiz submitted:', { name, rollNumber, category, score, percentage });
     
     // Get config for passing percentage
     const config = await Config.findOne() || { passingPercentage: 40 };
@@ -812,11 +954,10 @@ app.post('/api/quiz/submit', async (req, res) => {
   }
 });
 
-// ✅ GET REGISTRATIONS (for admin)
+// ✅ GET REGISTRATIONS (for admin) - ADD THIS
 app.get('/api/admin/registrations', verifyToken, async (req, res) => {
   try {
-    const registrations = await Registration.find()
-      .sort({ registeredAt: -1 });
+    const registrations = await Registration.find().sort({ registeredAt: -1 });
     
     res.json({
       success: true,
@@ -834,7 +975,7 @@ app.get('/api/admin/registrations', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ INIT DATABASE (for testing)
+// ✅ INIT DATABASE (for testing) - ADD THIS
 app.get('/api/init-db', async (req, res) => {
   try {
     await initializeDatabase();
@@ -857,20 +998,7 @@ app.use((req, res) => {
   res.status(404).json({
     success: false,
     message: `Route ${req.originalUrl} not found`,
-    availableEndpoints: {
-      GET: [
-        '/',
-        '/api/health',
-        '/api/config',
-        '/api/categories',
-        '/api/quiz/questions/:category'
-      ],
-      POST: [
-        '/api/register',
-        '/api/admin/login',
-        '/api/quiz/submit'
-      ]
-    }
+    suggestion: 'Check / endpoint for available routes'
   });
 });
 
@@ -892,4 +1020,6 @@ app.listen(PORT, () => {
   console.log(`🔗 Health Check: http://localhost:${PORT}/api/health`);
   console.log(`👨‍💼 Admin Login: http://localhost:${PORT}/admin/login`);
   console.log(`📝 Registration: POST http://localhost:${PORT}/api/register`);
+  console.log(`🎯 Quiz Questions: GET http://localhost:${PORT}/api/quiz/questions/:category`);
+  console.log(`✅ Sample questions are pre-loaded for: html, css, javascript, react, node`);
 });
