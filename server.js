@@ -15,7 +15,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// MongoDB Connection - FIXED
+// MongoDB Connection
 const MONGODB_URI = 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
 
 console.log('🔗 Connecting to MongoDB...');
@@ -47,6 +47,13 @@ const userSchema = new mongoose.Schema({
   submittedAt: { type: Date, default: Date.now }
 });
 
+const registrationSchema = new mongoose.Schema({
+  name: String,
+  rollNumber: String,
+  category: String,
+  registeredAt: { type: Date, default: Date.now }
+});
+
 const questionSchema = new mongoose.Schema({
   category: String,
   questionText: String,
@@ -75,14 +82,14 @@ const configSchema = new mongoose.Schema({
 });
 
 const User = mongoose.model('User', userSchema);
+const Registration = mongoose.model('Registration', registrationSchema);
 const Question = mongoose.model('Question', questionSchema);
 const Admin = mongoose.model('Admin', adminSchema);
 const Config = mongoose.model('Config', configSchema);
 
-// Initialize Database
+// Initialize Database function
 async function initializeDatabase() {
   try {
-    // Create default admin
     const adminExists = await Admin.findOne({ username: 'admin' });
     if (!adminExists) {
       const hashedPassword = await bcrypt.hash('admin123', 10);
@@ -95,7 +102,6 @@ async function initializeDatabase() {
       console.log('✅ Default admin created (username: admin, password: admin123)');
     }
 
-    // Create default config
     const configExists = await Config.findOne();
     if (!configExists) {
       await Config.create({
@@ -106,64 +112,66 @@ async function initializeDatabase() {
       console.log('✅ Default config created');
     }
 
-    // Create sample questions for each category
-    const categories = ['html', 'css', 'javascript', 'react', 'node', 'python', 'java', 'mongodb', 'docker', 'aws'];
-    
-    for (const category of categories) {
-      const categoryQuestions = await Question.countDocuments({ category });
-      if (categoryQuestions === 0) {
-        await createSampleQuestionsForCategory(category);
-        console.log(`✅ Sample questions created for ${category}`);
-      }
+    // Add sample questions for testing if no questions exist
+    const questionCount = await Question.countDocuments();
+    if (questionCount === 0) {
+      console.log('📝 Creating sample questions for testing...');
+      
+      const sampleQuestions = [
+        {
+          category: 'react',
+          questionText: 'What is React?',
+          options: [
+            { text: 'A JavaScript library for building user interfaces', isCorrect: true },
+            { text: 'A database management system', isCorrect: false },
+            { text: 'A programming language', isCorrect: false },
+            { text: 'An operating system', isCorrect: false }
+          ],
+          difficulty: 'easy'
+        },
+        {
+          category: 'react',
+          questionText: 'What is JSX?',
+          options: [
+            { text: 'JavaScript XML', isCorrect: true },
+            { text: 'Java Syntax Extension', isCorrect: false },
+            { text: 'JavaScript Extension', isCorrect: false },
+            { text: 'Java XML', isCorrect: false }
+          ],
+          difficulty: 'easy'
+        },
+        {
+          category: 'javascript',
+          questionText: 'What is closure in JavaScript?',
+          options: [
+            { text: 'A function with access to its outer function scope', isCorrect: true },
+            { text: 'A way to close browser tabs', isCorrect: false },
+            { text: 'A type of loop', isCorrect: false },
+            { text: 'A database connection', isCorrect: false }
+          ],
+          difficulty: 'medium'
+        },
+        {
+          category: 'node',
+          questionText: 'What is Node.js?',
+          options: [
+            { text: 'JavaScript runtime built on Chrome V8 engine', isCorrect: true },
+            { text: 'A frontend framework', isCorrect: false },
+            { text: 'A database', isCorrect: false },
+            { text: 'A CSS preprocessor', isCorrect: false }
+          ],
+          difficulty: 'easy'
+        }
+      ];
+      
+      await Question.insertMany(sampleQuestions);
+      console.log('✅ Created sample questions for react, javascript, and node categories');
     }
 
     console.log('✅ Database initialization complete');
   } catch (error) {
     console.error('Error initializing database:', error);
   }
-}
-
-async function createSampleQuestionsForCategory(category) {
-  const questions = [
-    {
-      category: category,
-      questionText: `What is ${category.toUpperCase()} primarily used for?`,
-      options: [
-        { text: 'Web development', isCorrect: true },
-        { text: 'Mobile app development', isCorrect: false },
-        { text: 'Database management', isCorrect: false },
-        { text: 'System administration', isCorrect: false }
-      ],
-      marks: 2,
-      difficulty: 'easy'
-    },
-    {
-      category: category,
-      questionText: `Which of the following is a key feature of ${category.toUpperCase()}?`,
-      options: [
-        { text: 'Speed and performance', isCorrect: true },
-        { text: 'Easy to learn', isCorrect: false },
-        { text: 'Large community', isCorrect: false },
-        { text: 'All of the above', isCorrect: false }
-      ],
-      marks: 2,
-      difficulty: 'medium'
-    },
-    {
-      category: category,
-      questionText: `What year was ${category.toUpperCase()} first released?`,
-      options: [
-        { text: '1995', isCorrect: false },
-        { text: '2000', isCorrect: false },
-        { text: '2005', isCorrect: true },
-        { text: '2010', isCorrect: false }
-      ],
-      marks: 3,
-      difficulty: 'hard'
-    }
-  ];
-
-  await Question.insertMany(questions);
 }
 
 // JWT Secret
@@ -194,65 +202,129 @@ const verifyToken = (req, res, next) => {
 
 // ==================== ROUTES ====================
 
+// ✅ ROOT ROUTE
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: '🚀 Shamsi Institute Quiz System Backend API',
+    version: '1.0.0',
+    database: mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: 'GET /api/health',
+      register: 'POST /api/register',
+      adminLogin: 'POST /api/admin/login',
+      quizQuestions: 'GET /api/quiz/questions/:category',
+      submitQuiz: 'POST /api/quiz/submit',
+      config: 'GET /api/config'
+    }
+  });
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({
     success: true,
-    message: 'Server is running',
-    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+    message: 'Server is running 🟢',
+    database: mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌',
     timestamp: new Date().toISOString()
   });
 });
 
-// Initialize database
-app.get('/api/init-db', async (req, res) => {
+// ✅ REGISTER USER - NEW ENDPOINT
+app.post('/api/register', async (req, res) => {
   try {
-    await initializeDatabase();
+    const { name, rollNumber, category } = req.body;
+    
+    console.log('Registration attempt:', { name, rollNumber, category });
+    
+    if (!name || !rollNumber || !category) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide name, roll number, and category'
+      });
+    }
+    
+    // Check if roll number already registered today
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const existingRegistration = await Registration.findOne({
+      rollNumber,
+      registeredAt: { $gte: today }
+    });
+    
+    if (existingRegistration) {
+      return res.status(400).json({
+        success: false,
+        message: 'This roll number is already registered today'
+      });
+    }
+    
+    // Save registration
+    const registration = new Registration({
+      name,
+      rollNumber,
+      category
+    });
+    
+    await registration.save();
+    
     res.json({
       success: true,
-      message: 'Database initialized successfully'
+      message: 'Registration successful',
+      data: {
+        name,
+        rollNumber,
+        category,
+        registeredAt: registration.registeredAt
+      }
     });
+    
   } catch (error) {
+    console.error('Registration error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error initializing database',
+      message: 'Registration failed',
       error: error.message
     });
   }
 });
 
-// Admin login
+// ✅ ADMIN LOGIN
 app.post('/api/admin/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     
-    // Development fallback for testing
-    if (username === 'admin' && password === 'admin123') {
-      const token = jwt.sign(
-        { 
-          id: 'dev_admin_id', 
-          username: 'admin', 
-          role: 'superadmin'
-        },
-        JWT_SECRET,
-        { expiresIn: '24h' }
-      );
-      
-      return res.json({
-        success: true,
-        message: 'Login successful',
-        token,
-        user: {
-          username: 'admin',
-          role: 'superadmin'
-        }
-      });
-    }
+    console.log('Login attempt:', { username });
     
     // Check in database
     const admin = await Admin.findOne({ username });
     
     if (!admin) {
+      // Development fallback for testing
+      if (username === 'admin' && password === 'admin123') {
+        const token = jwt.sign(
+          { 
+            id: 'dev_admin_id', 
+            username: 'admin', 
+            role: 'superadmin'
+          },
+          JWT_SECRET,
+          { expiresIn: '24h' }
+        );
+        
+        return res.json({
+          success: true,
+          message: 'Login successful (Development Mode)',
+          token,
+          user: {
+            username: 'admin',
+            role: 'superadmin'
+          }
+        });
+      }
+      
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -297,12 +369,13 @@ app.post('/api/admin/login', async (req, res) => {
   }
 });
 
-// Get dashboard stats
+// ✅ GET DASHBOARD STATS
 app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
   try {
     const totalStudents = await User.countDocuments();
     const totalQuestions = await Question.countDocuments();
     const totalAttempts = await User.countDocuments({ submittedAt: { $ne: null } });
+    const totalRegistrations = await Registration.countDocuments();
     
     const results = await User.find({ submittedAt: { $ne: null } });
     let averageScore = 0;
@@ -322,6 +395,10 @@ app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
       submittedAt: { $gte: today } 
     });
     
+    const todayRegistrations = await Registration.countDocuments({ 
+      registeredAt: { $gte: today } 
+    });
+    
     const config = await Config.findOne() || { quizTime: 30, passingPercentage: 40, totalQuestions: 50 };
     
     res.json({
@@ -330,9 +407,11 @@ app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
         totalStudents,
         totalQuestions,
         totalAttempts,
+        totalRegistrations,
         averageScore: averageScore.toFixed(2),
         passRate: passRate.toFixed(2),
         todayAttempts,
+        todayRegistrations,
         quizTime: config.quizTime,
         passingPercentage: config.passingPercentage
       }
@@ -348,14 +427,14 @@ app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
   }
 });
 
-// Get all questions
+// ✅ GET ALL QUESTIONS
 app.get('/api/admin/questions', verifyToken, async (req, res) => {
   try {
     const { category, page = 1, limit = 100 } = req.query;
     
     let query = {};
     if (category && category !== 'all') {
-      query.category = category;
+      query.category = category.toLowerCase();
     }
     
     const skip = (page - 1) * limit;
@@ -384,10 +463,12 @@ app.get('/api/admin/questions', verifyToken, async (req, res) => {
   }
 });
 
-// Add question
+// ✅ ADD QUESTION
 app.post('/api/admin/questions', verifyToken, async (req, res) => {
   try {
     const { category, questionText, options, marks, difficulty } = req.body;
+    
+    console.log('Adding question:', { category, questionText });
     
     if (!category || !questionText || !options || options.length < 2) {
       return res.status(400).json({
@@ -396,7 +477,6 @@ app.post('/api/admin/questions', verifyToken, async (req, res) => {
       });
     }
     
-    // Validate exactly one correct option
     const correctOptions = options.filter(opt => opt.isCorrect);
     if (correctOptions.length !== 1) {
       return res.status(400).json({
@@ -431,7 +511,7 @@ app.post('/api/admin/questions', verifyToken, async (req, res) => {
   }
 });
 
-// Delete question
+// ✅ DELETE QUESTION
 app.delete('/api/admin/questions/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -460,7 +540,7 @@ app.delete('/api/admin/questions/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Get results
+// ✅ GET RESULTS
 app.get('/api/admin/results', verifyToken, async (req, res) => {
   try {
     const results = await User.find({ submittedAt: { $ne: null } })
@@ -482,7 +562,7 @@ app.get('/api/admin/results', verifyToken, async (req, res) => {
   }
 });
 
-// Delete result
+// ✅ DELETE RESULT
 app.delete('/api/admin/results/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -511,7 +591,7 @@ app.delete('/api/admin/results/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Delete all results
+// ✅ DELETE ALL RESULTS
 app.delete('/api/admin/results', verifyToken, async (req, res) => {
   try {
     await User.deleteMany({ submittedAt: { $ne: null } });
@@ -531,7 +611,7 @@ app.delete('/api/admin/results', verifyToken, async (req, res) => {
   }
 });
 
-// Get config
+// ✅ GET CONFIG
 app.get('/api/config', async (req, res) => {
   try {
     const config = await Config.findOne() || {
@@ -555,7 +635,7 @@ app.get('/api/config', async (req, res) => {
   }
 });
 
-// Update config
+// ✅ UPDATE CONFIG
 app.put('/api/config', verifyToken, async (req, res) => {
   try {
     const { quizTime, passingPercentage, totalQuestions } = req.body;
@@ -592,7 +672,7 @@ app.put('/api/config', verifyToken, async (req, res) => {
   }
 });
 
-// Get categories
+// ✅ GET CATEGORIES
 app.get('/api/categories', async (req, res) => {
   try {
     const categories = await Question.distinct('category');
@@ -603,14 +683,37 @@ app.get('/api/categories', async (req, res) => {
         return {
           value: category,
           label: category.charAt(0).toUpperCase() + category.slice(1),
-          questionCount: count
+          questionCount: count,
+          type: category === 'react' || category === 'javascript' || category === 'html' || category === 'css' ? 'frontend' : 
+                category === 'node' || category === 'express' || category === 'python' ? 'backend' : 
+                category === 'mongodb' || category === 'mysql' ? 'database' : 'general'
         };
       })
     );
     
+    // Add categories that might not have questions yet
+    const allCategories = [
+      ...categoriesWithCount,
+      { value: 'html', label: 'HTML', questionCount: 0, type: 'frontend' },
+      { value: 'css', label: 'CSS', questionCount: 0, type: 'frontend' },
+      { value: 'javascript', label: 'JavaScript', questionCount: 0, type: 'frontend' },
+      { value: 'react', label: 'React.js', questionCount: 0, type: 'frontend' },
+      { value: 'node', label: 'Node.js', questionCount: 0, type: 'backend' },
+      { value: 'express', label: 'Express.js', questionCount: 0, type: 'backend' },
+      { value: 'mongodb', label: 'MongoDB', questionCount: 0, type: 'database' },
+      { value: 'mysql', label: 'MySQL', questionCount: 0, type: 'database' },
+      { value: 'docker', label: 'Docker', questionCount: 0, type: 'devops' },
+      { value: 'git', label: 'Git', questionCount: 0, type: 'devops' }
+    ];
+    
+    // Remove duplicates
+    const uniqueCategories = allCategories.filter((cat, index, self) =>
+      index === self.findIndex((c) => c.value === cat.value)
+    );
+    
     res.json({
       success: true,
-      categories: categoriesWithCount
+      categories: uniqueCategories
     });
     
   } catch (error) {
@@ -623,18 +726,20 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-// Get quiz questions
+// ✅ GET QUIZ QUESTIONS
 app.get('/api/quiz/questions/:category', async (req, res) => {
   try {
     const { category } = req.params;
     
+    console.log('Fetching questions for category:', category);
+    
     const questions = await Question.find({ category: category.toLowerCase() });
     
     if (questions.length === 0) {
-      return res.json({
-        success: true,
+      return res.status(404).json({
+        success: false,
+        message: 'No questions available for this category. Please ask administrator to add questions first.',
         questions: [],
-        message: 'No questions available for this category',
         count: 0
       });
     }
@@ -667,10 +772,12 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
   }
 });
 
-// Submit quiz
+// ✅ SUBMIT QUIZ
 app.post('/api/quiz/submit', async (req, res) => {
   try {
     const { rollNumber, name, category, score, percentage, totalQuestions, correctAnswers } = req.body;
+    
+    console.log('Submitting quiz:', { name, rollNumber, category, score, percentage });
     
     // Get config for passing percentage
     const config = await Config.findOne() || { passingPercentage: 40 };
@@ -679,9 +786,9 @@ app.post('/api/quiz/submit', async (req, res) => {
       name,
       rollNumber: rollNumber.startsWith('SI-') ? rollNumber : `SI-${rollNumber}`,
       category: category.toLowerCase(),
-      score,
+      score: correctAnswers || score,
       percentage,
-      marksObtained: score,
+      marksObtained: correctAnswers || score,
       totalMarks: totalQuestions,
       passed: percentage >= config.passingPercentage,
       submittedAt: new Date()
@@ -705,10 +812,84 @@ app.post('/api/quiz/submit', async (req, res) => {
   }
 });
 
+// ✅ GET REGISTRATIONS (for admin)
+app.get('/api/admin/registrations', verifyToken, async (req, res) => {
+  try {
+    const registrations = await Registration.find()
+      .sort({ registeredAt: -1 });
+    
+    res.json({
+      success: true,
+      registrations,
+      count: registrations.length
+    });
+    
+  } catch (error) {
+    console.error('Get registrations error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching registrations',
+      error: error.message
+    });
+  }
+});
+
+// ✅ INIT DATABASE (for testing)
+app.get('/api/init-db', async (req, res) => {
+  try {
+    await initializeDatabase();
+    res.json({
+      success: true,
+      message: 'Database initialized successfully'
+    });
+  } catch (error) {
+    console.error('Init database error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error initializing database',
+      error: error.message
+    });
+  }
+});
+
+// 404 Handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Route ${req.originalUrl} not found`,
+    availableEndpoints: {
+      GET: [
+        '/',
+        '/api/health',
+        '/api/config',
+        '/api/categories',
+        '/api/quiz/questions/:category'
+      ],
+      POST: [
+        '/api/register',
+        '/api/admin/login',
+        '/api/quiz/submit'
+      ]
+    }
+  });
+});
+
+// Error handling middleware
+app.use((error, req, res, next) => {
+  console.error('Global error handler:', error);
+  res.status(500).json({
+    success: false,
+    message: 'Internal server error',
+    error: error.message
+  });
+});
+
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📡 API Base URL: http://localhost:${PORT}`);
+  console.log(`📡 Home: http://localhost:${PORT}`);
   console.log(`🔗 Health Check: http://localhost:${PORT}/api/health`);
+  console.log(`👨‍💼 Admin Login: http://localhost:${PORT}/admin/login`);
+  console.log(`📝 Registration: POST http://localhost:${PORT}/api/register`);
 });
