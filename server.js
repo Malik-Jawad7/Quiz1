@@ -3,13 +3,19 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-require('dotenv').config();
 
 const app = express();
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:5000'],
+  origin: [
+    'http://localhost:5173', 
+    'http://localhost:3000', 
+    'http://localhost:5000',
+    'https://quiz2-iota-one.vercel.app',  // Your frontend URL
+    'https://quiz2-q91hwq8ic-khalids-projects-3de9ee65.vercel.app',
+    'https://*.vercel.app'  // All Vercel domains
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -17,7 +23,7 @@ app.use(cors({
 app.use(express.json());
 
 // MongoDB Connection
-const MONGODB_URI = 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
 
 console.log('🔗 Attempting MongoDB connection...');
 
@@ -78,8 +84,8 @@ const Question = mongoose.model('Question', questionSchema);
 const Admin = mongoose.model('Admin', adminSchema);
 const Config = mongoose.model('Config', configSchema);
 
-// JWT Secret
-const JWT_SECRET = 'shamsi_institute_secret_key_2024';
+// JWT Secret from environment variable
+const JWT_SECRET = process.env.JWT_SECRET || 'shamsi_institute_secret_key_2024';
 
 // Check if MongoDB is connected
 const isDBConnected = () => {
@@ -145,6 +151,25 @@ async function createSampleData() {
 }
 
 // ==================== ROUTES ====================
+
+// Root route - Vercel के लिए जरूरी
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Shamsi Institute Quiz System API',
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+    status: 'Online',
+    endpoints: {
+      health: '/api/health',
+      admin_login: '/api/admin/login',
+      quiz_questions: '/api/quiz/questions/:category',
+      config: '/api/config',
+      categories: '/api/categories'
+    },
+    mongodb: isDBConnected() ? 'connected' : 'disconnected'
+  });
+});
 
 // Health Check
 app.get('/api/health', (req, res) => {
@@ -774,19 +799,7 @@ app.post('/api/quiz/submit', async (req, res) => {
   }
 });
 
-// ==================== START SERVER ====================
+// ==================== VERCEL COMPATIBLE EXPORT ====================
 
-const PORT = 5000;
-app.listen(PORT, () => {
-  console.log(`
-  🚀 Server running on port ${PORT}
-  🌐 http://localhost:${PORT}
-  
-  ==== ADMIN CREDENTIALS ====
-  👨‍💼 Username: admin
-  🔑 Password: admin123
-  
-  ==== CURRENT STATUS ====
-  MongoDB: ${isDBConnected() ? '✅ Connected' : '❌ Disconnected'}
-  `);
-});
+// Vercel serverless function के लिए
+module.exports = app;
