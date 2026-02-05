@@ -17,11 +17,8 @@ const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, curl, Postman)
     if (!origin) {
-      console.log('🌐 Request with no origin (server-to-server)');
       return callback(null, true);
     }
-    
-    console.log('🌐 Incoming request from origin:', origin);
     
     // Extensive list of allowed origins
     const allowedOrigins = [
@@ -78,11 +75,8 @@ const corsOptions = {
         origin.includes('localhost') || 
         origin.includes('127.0.0.1') ||
         origin.includes('vercel.app')) {
-      console.log('✅ Origin allowed:', origin);
       callback(null, true);
     } else {
-      console.log('❌ CORS blocked origin:', origin);
-      console.log('✅ Allowed patterns:', allowedOrigins);
       callback(new Error(`CORS Error: Origin ${origin} not allowed`));
     }
   },
@@ -121,7 +115,6 @@ app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
   console.log(`\n📥 ${timestamp} - ${req.method} ${req.url}`);
   console.log('🌐 Origin:', req.headers.origin || 'Not specified');
-  console.log('📋 Headers:', JSON.stringify(req.headers, null, 2));
   next();
 });
 
@@ -239,7 +232,6 @@ async function initializeDatabase() {
     // Create new admin with hashed password
     const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
     const hashedPassword = await bcrypt.hash(adminPassword, 12);
-    console.log('🔐 Created hash for password:', adminPassword);
     
     await Admin.create({
       username: process.env.ADMIN_USERNAME || 'admin',
@@ -248,7 +240,7 @@ async function initializeDatabase() {
       role: 'superadmin'
     });
     
-    console.log(`✅ Default admin created (username: ${process.env.ADMIN_USERNAME || 'admin'}, password: ${adminPassword})`);
+    console.log(`✅ Default admin created (username: ${process.env.ADMIN_USERNAME || 'admin'})`);
 
     // Initialize config if not exists
     const configExists = await Config.findOne();
