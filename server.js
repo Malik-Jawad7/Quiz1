@@ -3,8 +3,14 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+require('dotenv').config();
 
 const app = express();
+
+// ========== ENVIRONMENT VARIABLES ==========
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
+const JWT_SECRET = process.env.JWT_SECRET || 'shamsi_institute_secret_key_2024_production';
+const PORT = process.env.PORT || 5000;
 
 // ========== FIXED CORS CONFIGURATION ==========
 const corsOptions = {
@@ -114,7 +120,7 @@ app.options('*', cors(corsOptions));
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
   console.log(`\n📥 ${timestamp} - ${req.method} ${req.url}`);
-  console.log('🌐 Origin:', req.headers.origin);
+  console.log('🌐 Origin:', req.headers.origin || 'Not specified');
   console.log('📋 Headers:', JSON.stringify(req.headers, null, 2));
   next();
 });
@@ -123,26 +129,43 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// MongoDB Connection
-const MONGODB_URI = 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
+// ========== MONGODB CONNECTION WITH RETRY LOGIC ==========
+console.log('🔗 Initializing MongoDB connection...');
 
-console.log('🔗 Connecting to MongoDB...');
+const connectWithRetry = async () => {
+  try {
+    await mongoose.connect(MONGODB_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+    });
+    console.log('✅ MongoDB Connected Successfully!');
+    console.log('📊 Database: quiz_system');
+    console.log('📈 Connection State:', mongoose.connection.readyState);
+    initializeDatabase();
+  } catch (err) {
+    console.error('❌ MongoDB Connection Error:', err.message);
+    console.log('🔄 Retrying connection in 5 seconds...');
+    setTimeout(connectWithRetry, 5000);
+  }
+};
 
-mongoose.connect(MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 10000,
-  socketTimeoutMS: 45000,
-})
-.then(() => {
-  console.log('✅ MongoDB Connected Successfully!');
-  console.log('📊 Database: quiz_system');
-  initializeDatabase();
-})
-.catch(err => {
-  console.error('❌ MongoDB Connection Failed:', err.message);
-  console.error('💡 Check your MongoDB connection string and network connectivity');
+// MongoDB event listeners
+mongoose.connection.on('connected', () => {
+  console.log('📡 Mongoose connected to DB');
 });
+
+mongoose.connection.on('error', (err) => {
+  console.error('❌ Mongoose connection error:', err);
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.log('⚠️ Mongoose disconnected from DB');
+});
+
+// Start connection
+connectWithRetry();
 
 // ========== DATABASE SCHEMAS ==========
 const userSchema = new mongoose.Schema({
@@ -204,9 +227,6 @@ const Question = mongoose.model('Question', questionSchema);
 const Admin = mongoose.model('Admin', adminSchema);
 const Config = mongoose.model('Config', configSchema);
 
-// JWT Secret
-const JWT_SECRET = process.env.JWT_SECRET || 'shamsi_institute_secret_key_2024_production';
-
 // ========== DATABASE INITIALIZATION ==========
 async function initializeDatabase() {
   try {
@@ -217,17 +237,18 @@ async function initializeDatabase() {
     console.log('🗑️ Cleared existing admin user');
     
     // Create new admin with hashed password
-    const hashedPassword = await bcrypt.hash('admin123', 12);
-    console.log('🔐 Created hash for password: admin123');
+    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+    const hashedPassword = await bcrypt.hash(adminPassword, 12);
+    console.log('🔐 Created hash for password:', adminPassword);
     
     await Admin.create({
-      username: 'admin',
+      username: process.env.ADMIN_USERNAME || 'admin',
       password: hashedPassword,
       email: 'admin@shamsi.edu.pk',
       role: 'superadmin'
     });
     
-    console.log('✅ Default admin created (username: admin, password: admin123)');
+    console.log(`✅ Default admin created (username: ${process.env.ADMIN_USERNAME || 'admin'}, password: ${adminPassword})`);
 
     // Initialize config if not exists
     const configExists = await Config.findOne();
@@ -312,7 +333,8 @@ app.get('/api/health', (req, res) => {
     cors: {
       origin: req.headers.origin || 'Not specified',
       allowed: true
-    }
+    },
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
@@ -322,6 +344,7 @@ app.get('/admin/debug', async (req, res) => {
     const admins = await Admin.find({});
     const questions = await Question.countDocuments();
     const results = await User.countDocuments();
+    const registrations = await Registration.countDocuments();
     
     res.json({
       success: true,
@@ -329,19 +352,23 @@ app.get('/admin/debug', async (req, res) => {
         admins: admins.length,
         questions: questions,
         results: results,
-        database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
+        registrations: registrations,
+        database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+        connectionState: mongoose.connection.readyState
       },
       adminDetails: admins.map(a => ({
         username: a.username,
         hasPassword: !!a.password,
-        role: a.role
+        role: a.role,
+        createdAt: a.createdAt
       }))
     });
   } catch (error) {
     console.error('Debug error:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
@@ -352,29 +379,6 @@ app.post('/admin/login', async (req, res) => {
     const { username, password } = req.body;
     
     console.log('🔐 Admin login attempt for:', username);
-    
-    // Hardcoded credentials for emergency access
-    if (username === 'admin' && password === 'admin123') {
-      const token = jwt.sign(
-        { 
-          id: 'admin-emergency-001',
-          username: 'admin', 
-          role: 'superadmin'
-        },
-        JWT_SECRET,
-        { expiresIn: '24h' }
-      );
-      
-      return res.json({
-        success: true,
-        message: 'Login successful (emergency access)',
-        token,
-        user: {
-          username: 'admin',
-          role: 'superadmin'
-        }
-      });
-    }
     
     // Check in database
     const admin = await Admin.findOne({ username });
@@ -518,8 +522,13 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
     
     // Return questions with isCorrect hidden for security
     const secureQuestions = limitedQuestions.map(q => ({
-      ...q._doc,
-      options: q.options.map(opt => ({ text: opt.text })) // Hide isCorrect from students
+      _id: q._id,
+      category: q.category,
+      questionText: q.questionText,
+      options: q.options.map(opt => ({ text: opt.text })),
+      marks: q.marks,
+      difficulty: q.difficulty,
+      createdAt: q.createdAt
     }));
     
     res.json({
@@ -1069,6 +1078,40 @@ app.post('/api/admin/fix-questions', verifyToken, async (req, res) => {
   }
 });
 
+// Get Database Status
+app.get('/api/db-status', async (req, res) => {
+  try {
+    const collections = await mongoose.connection.db.listCollections().toArray();
+    const collectionNames = collections.map(c => c.name);
+    
+    const stats = {
+      connectionState: mongoose.connection.readyState,
+      collections: collectionNames,
+      userCount: await User.countDocuments(),
+      questionCount: await Question.countDocuments(),
+      registrationCount: await Registration.countDocuments(),
+      adminCount: await Admin.countDocuments(),
+      configExists: !!(await Config.findOne())
+    };
+    
+    res.json({
+      success: true,
+      database: {
+        connected: mongoose.connection.readyState === 1,
+        state: mongoose.connection.readyState,
+        stats
+      }
+    });
+  } catch (error) {
+    console.error('DB Status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error getting database status',
+      error: error.message
+    });
+  }
+});
+
 // ========== ERROR HANDLING ==========
 
 // 404 Handler
@@ -1091,7 +1134,8 @@ app.use((req, res) => {
       '/api/admin/questions',
       '/api/admin/results',
       '/api/admin/registrations',
-      '/api/admin/fix-questions'
+      '/api/admin/fix-questions',
+      '/api/db-status'
     ]
   });
 });
@@ -1120,12 +1164,12 @@ app.use((err, req, res, next) => {
   res.status(500).json({
     success: false,
     message: 'Internal server error',
-    error: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+    error: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong',
+    timestamp: new Date().toISOString()
   });
 });
 
 // ========== START SERVER ==========
-const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log('\n' + '='.repeat(50));
   console.log('🚀 Shamsi Institute Quiz System Backend');
@@ -1134,7 +1178,7 @@ app.listen(PORT, () => {
   console.log(`🌐 Local URL: http://localhost:${PORT}`);
   console.log(`🌐 Production URL: https://backend-one-taupe-14.vercel.app`);
   console.log(`✅ CORS configured for multiple origins`);
-  console.log(`✅ MongoDB: ${mongoose.connection.readyState === 1 ? 'Connected' : 'Connecting...'}`);
+  console.log(`✅ Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log('='.repeat(50));
   console.log('📋 Available endpoints:');
   console.log('   GET  /                    - API Info');
@@ -1145,5 +1189,6 @@ app.listen(PORT, () => {
   console.log('   POST /api/quiz/submit     - Submit Quiz');
   console.log('   GET  /api/config          - Get Config');
   console.log('   GET  /api/categories      - Get Categories');
+  console.log('   GET  /api/db-status       - Database Status');
   console.log('='.repeat(50));
 });
