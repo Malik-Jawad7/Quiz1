@@ -8,157 +8,134 @@ require('dotenv').config();
 const app = express();
 
 // ========== ENVIRONMENT VARIABLES ==========
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority&appName=Cluster0';
 const JWT_SECRET = process.env.JWT_SECRET || 'shamsi_institute_secret_key_2024_production';
 const PORT = process.env.PORT || 5000;
 
-// ========== FIXED CORS CONFIGURATION ==========
+// ========== IMPROVED CORS CONFIGURATION ==========
 const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl, Postman)
-    if (!origin) {
-      return callback(null, true);
-    }
-    
-    // Extensive list of allowed origins
-    const allowedOrigins = [
-      // Your main production frontend
-      'https://quiz2-iota-one.vercel.app',
-      
-      // Vercel preview deployments (wildcard patterns)
-      'https://quiz2-*.vercel.app',
-      'https://*-quiz2.vercel.app',
-      
-      // Local development URLs
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-      'http://localhost:5174',
-      'http://127.0.0.1:5174',
-      'http://localhost:5175',
-      'http://127.0.0.1:5175',
-      'http://localhost:5176',
-      'http://127.0.0.1:5176',
-      'http://localhost:8080',
-      'http://127.0.0.1:8080',
-      
-      // Common Vercel patterns
-      'https://*.vercel.app',
-      'http://*.vercel.app',
-      
-      // Development patterns
-      'http://localhost:*',
-      'http://127.0.0.1:*'
-    ];
-    
-    // Function to check if origin matches any pattern
-    const isOriginAllowed = (origin) => {
-      for (const allowed of allowedOrigins) {
-        if (allowed.includes('*')) {
-          // Convert pattern to regex
-          const pattern = allowed
-            .replace(/\./g, '\\.')
-            .replace(/\*/g, '.*');
-          const regex = new RegExp(`^${pattern}$`);
-          if (regex.test(origin)) {
-            return true;
-          }
-        } else if (origin === allowed) {
-          return true;
-        }
-      }
-      return false;
-    };
-    
-    // Check if origin is allowed
-    if (isOriginAllowed(origin) || 
-        origin.includes('localhost') || 
-        origin.includes('127.0.0.1') ||
-        origin.includes('vercel.app')) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS Error: Origin ${origin} not allowed`));
-    }
-  },
+  origin: [
+    'https://quiz2-iota-one.vercel.app',
+    'https://quiz2-*.vercel.app',
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:5175',
+    'http://localhost:5176',
+    'http://localhost:8080'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'X-Requested-With',
-    'Accept',
-    'Origin',
-    'Access-Control-Request-Method',
-    'Access-Control-Request-Headers',
-    'X-API-Key',
-    'X-Requested-With'
-  ],
-  exposedHeaders: [
-    'Content-Range',
-    'X-Content-Range',
-    'Access-Control-Allow-Origin',
-    'Access-Control-Allow-Credentials'
-  ],
-  maxAge: 86400,
-  preflightContinue: false,
-  optionsSuccessStatus: 200
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  maxAge: 86400
 };
 
-// Apply CORS middleware
 app.use(cors(corsOptions));
-
-// Handle OPTIONS preflight requests
 app.options('*', cors(corsOptions));
-
-// Request logging middleware
-app.use((req, res, next) => {
-  const timestamp = new Date().toISOString();
-  console.log(`\n📥 ${timestamp} - ${req.method} ${req.url}`);
-  console.log('🌐 Origin:', req.headers.origin || 'Not specified');
-  next();
-});
 
 // Body parser middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ========== MONGODB CONNECTION WITH RETRY LOGIC ==========
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`\n📥 ${new Date().toISOString()} - ${req.method} ${req.url}`);
+  console.log('🌐 Origin:', req.headers.origin || 'Not specified');
+  next();
+});
+
+// ========== IMPROVED MONGODB CONNECTION ==========
 console.log('🔗 Initializing MongoDB connection...');
 
-const connectWithRetry = async () => {
+// Enable Mongoose debugging
+mongoose.set('debug', process.env.NODE_ENV === 'development');
+
+// Mongoose connection with better options
+const mongooseOptions = {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+  serverSelectionTimeoutMS: 30000, // 30 seconds
+  socketTimeoutMS: 45000, // 45 seconds
+  maxPoolSize: 10,
+  minPoolSize: 5,
+  retryWrites: true,
+  w: 'majority'
+};
+
+// Track connection state
+let isDbConnected = false;
+let connectionRetries = 0;
+const maxRetries = 5;
+
+const connectDB = async () => {
   try {
-    await mongoose.connect(MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 10000,
-      socketTimeoutMS: 45000,
-    });
+    console.log(`🔄 Attempting MongoDB connection (Attempt ${connectionRetries + 1}/${maxRetries})...`);
+    
+    if (!MONGODB_URI) {
+      throw new Error('MONGODB_URI is not defined in environment variables');
+    }
+
+    // Hide password in logs for security
+    const maskedUri = MONGODB_URI.replace(/\/\/[^@]+@/, '//****:****@');
+    console.log(`🔗 Connecting to: ${maskedUri}`);
+    
+    await mongoose.connect(MONGODB_URI, mongooseOptions);
+    
+    isDbConnected = true;
+    connectionRetries = 0;
+    
     console.log('✅ MongoDB Connected Successfully!');
-    console.log('📊 Database: quiz_system');
-    console.log('📈 Connection State:', mongoose.connection.readyState);
-    initializeDatabase();
-  } catch (err) {
-    console.error('❌ MongoDB Connection Error:', err.message);
-    console.log('🔄 Retrying connection in 5 seconds...');
-    setTimeout(connectWithRetry, 5000);
+    console.log(`📊 Database: ${mongoose.connection.name}`);
+    console.log(`📈 Host: ${mongoose.connection.host}`);
+    console.log(`🚪 Port: ${mongoose.connection.port}`);
+    
+    return mongoose.connection;
+    
+  } catch (error) {
+    connectionRetries++;
+    console.error(`❌ MongoDB Connection Failed (Attempt ${connectionRetries}):`, error.message);
+    
+    if (connectionRetries >= maxRetries) {
+      console.error('❌ Max connection retries reached. Server will run without database.');
+      return null;
+    }
+    
+    // Wait 5 seconds before retrying
+    console.log(`🔄 Retrying in 5 seconds... (${connectionRetries}/${maxRetries})`);
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    return connectDB();
   }
 };
 
 // MongoDB event listeners
 mongoose.connection.on('connected', () => {
-  console.log('📡 Mongoose connected to DB');
+  console.log('📡 Mongoose connected to MongoDB');
+  isDbConnected = true;
 });
 
 mongoose.connection.on('error', (err) => {
-  console.error('❌ Mongoose connection error:', err);
+  console.error('❌ Mongoose connection error:', err.message);
+  isDbConnected = false;
 });
 
 mongoose.connection.on('disconnected', () => {
-  console.log('⚠️ Mongoose disconnected from DB');
+  console.log('⚠️ Mongoose disconnected from MongoDB');
+  isDbConnected = false;
 });
 
-// Start connection
-connectWithRetry();
+mongoose.connection.on('reconnected', () => {
+  console.log('🔁 Mongoose reconnected to MongoDB');
+  isDbConnected = true;
+});
+
+// Initialize database connection
+let dbConnection;
+(async () => {
+  dbConnection = await connectDB();
+  if (dbConnection) {
+    await initializeDatabase();
+  }
+})();
 
 // ========== DATABASE SCHEMAS ==========
 const userSchema = new mongoose.Schema({
@@ -223,24 +200,30 @@ const Config = mongoose.model('Config', configSchema);
 // ========== DATABASE INITIALIZATION ==========
 async function initializeDatabase() {
   try {
+    if (!isDbConnected) {
+      console.log('⚠️ Skipping database initialization - No database connection');
+      return;
+    }
+    
     console.log('🔄 Initializing database...');
     
-    // Clear and recreate admin user
-    await Admin.deleteMany({ username: 'admin' });
-    console.log('🗑️ Cleared existing admin user');
-    
-    // Create new admin with hashed password
-    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
-    const hashedPassword = await bcrypt.hash(adminPassword, 12);
-    
-    await Admin.create({
-      username: process.env.ADMIN_USERNAME || 'admin',
-      password: hashedPassword,
-      email: 'admin@shamsi.edu.pk',
-      role: 'superadmin'
-    });
-    
-    console.log(`✅ Default admin created (username: ${process.env.ADMIN_USERNAME || 'admin'})`);
+    // Create admin if doesn't exist
+    const adminExists = await Admin.findOne({ username: 'admin' });
+    if (!adminExists) {
+      const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+      const hashedPassword = await bcrypt.hash(adminPassword, 12);
+      
+      await Admin.create({
+        username: process.env.ADMIN_USERNAME || 'admin',
+        password: hashedPassword,
+        email: 'admin@shamsi.edu.pk',
+        role: 'superadmin'
+      });
+      
+      console.log(`✅ Admin user created`);
+    } else {
+      console.log('✅ Admin user already exists');
+    }
 
     // Initialize config if not exists
     const configExists = await Config.findOne();
@@ -251,6 +234,8 @@ async function initializeDatabase() {
         totalQuestions: 50
       });
       console.log('✅ Default config created');
+    } else {
+      console.log('✅ Config already exists');
     }
 
     // Check existing questions
@@ -259,7 +244,7 @@ async function initializeDatabase() {
 
     console.log('✅ Database initialization complete');
   } catch (error) {
-    console.error('❌ Error initializing database:', error);
+    console.error('❌ Error initializing database:', error.message);
   }
 }
 
@@ -287,6 +272,19 @@ const verifyToken = (req, res, next) => {
   }
 };
 
+// Database connection middleware
+const checkDbConnection = (req, res, next) => {
+  if (!isDbConnected) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database is not connected',
+      database: 'Disconnected',
+      timestamp: new Date().toISOString()
+    });
+  }
+  next();
+};
+
 // ========== ROUTES ==========
 
 // Root endpoint
@@ -295,7 +293,7 @@ app.get('/', (req, res) => {
     success: true,
     message: '🚀 Shamsi Institute Quiz System API',
     version: '2.1.0',
-    database: mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌',
+    database: isDbConnected ? 'Connected ✅' : 'Disconnected ❌',
     timestamp: new Date().toISOString(),
     cors: {
       enabled: true,
@@ -308,7 +306,8 @@ app.get('/', (req, res) => {
       quizQuestions: 'GET /api/quiz/questions/:category',
       submitQuiz: 'POST /api/quiz/submit',
       config: 'GET /api/config',
-      categories: 'GET /api/categories'
+      categories: 'GET /api/categories',
+      dbStatus: 'GET /api/db-status'
     }
   });
 });
@@ -318,7 +317,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     success: true,
     message: '✅ Server is running',
-    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+    database: isDbConnected ? 'Connected' : 'Disconnected',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     nodeVersion: process.version,
@@ -326,17 +325,93 @@ app.get('/api/health', (req, res) => {
       origin: req.headers.origin || 'Not specified',
       allowed: true
     },
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    mongooseState: mongoose.connection.readyState,
+    isDbConnected: isDbConnected
   });
 });
+
+// Database status endpoint (safe version)
+app.get('/api/db-status', async (req, res) => {
+  try {
+    if (!isDbConnected) {
+      return res.json({
+        success: true,
+        database: {
+          connected: false,
+          state: mongoose.connection.readyState,
+          stateText: getConnectionState(mongoose.connection.readyState),
+          message: 'Database is not connected'
+        },
+        environment: {
+          mongodb_uri_set: !!process.env.MONGODB_URI,
+          node_env: process.env.NODE_ENV || 'development'
+        }
+      });
+    }
+
+    // Try to get collections if database is connected
+    let collections = [];
+    try {
+      collections = await mongoose.connection.db.listCollections().toArray();
+    } catch (error) {
+      console.log('⚠️ Could not list collections:', error.message);
+    }
+
+    const stats = {
+      connectionState: mongoose.connection.readyState,
+      stateText: getConnectionState(mongoose.connection.readyState),
+      collections: collections.map(c => c.name),
+      userCount: await User.countDocuments().catch(() => 0),
+      questionCount: await Question.countDocuments().catch(() => 0),
+      registrationCount: await Registration.countDocuments().catch(() => 0),
+      adminCount: await Admin.countDocuments().catch(() => 0),
+      configExists: !!(await Config.findOne().catch(() => null))
+    };
+
+    res.json({
+      success: true,
+      database: {
+        connected: true,
+        host: mongoose.connection.host,
+        port: mongoose.connection.port,
+        name: mongoose.connection.name,
+        ...stats
+      },
+      environment: {
+        node_env: process.env.NODE_ENV || 'development',
+        mongodb_uri_set: !!process.env.MONGODB_URI
+      }
+    });
+  } catch (error) {
+    console.error('DB Status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error getting database status',
+      error: error.message,
+      mongooseState: mongoose.connection.readyState,
+      isDbConnected: isDbConnected
+    });
+  }
+});
+
+function getConnectionState(state) {
+  const states = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting'
+  };
+  return states[state] || 'unknown';
+}
 
 // Debug endpoint
 app.get('/admin/debug', async (req, res) => {
   try {
-    const admins = await Admin.find({});
-    const questions = await Question.countDocuments();
-    const results = await User.countDocuments();
-    const registrations = await Registration.countDocuments();
+    const admins = await Admin.find({}).catch(() => []);
+    const questions = await Question.countDocuments().catch(() => 0);
+    const results = await User.countDocuments().catch(() => 0);
+    const registrations = await Registration.countDocuments().catch(() => 0);
     
     res.json({
       success: true,
@@ -345,8 +420,9 @@ app.get('/admin/debug', async (req, res) => {
         questions: questions,
         results: results,
         registrations: registrations,
-        database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
-        connectionState: mongoose.connection.readyState
+        database: isDbConnected ? 'Connected' : 'Disconnected',
+        connectionState: mongoose.connection.readyState,
+        isDbConnected: isDbConnected
       },
       adminDetails: admins.map(a => ({
         username: a.username,
@@ -360,7 +436,8 @@ app.get('/admin/debug', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      isDbConnected: isDbConnected
     });
   }
 });
@@ -421,7 +498,7 @@ app.post('/admin/login', async (req, res) => {
 });
 
 // Student Registration
-app.post('/api/register', async (req, res) => {
+app.post('/api/register', checkDbConnection, async (req, res) => {
   try {
     const { name, rollNumber, category } = req.body;
     
@@ -455,7 +532,7 @@ app.post('/api/register', async (req, res) => {
       return res.status(400).json({
         success: false,
         message: `No questions available for "${category}" category.`,
-        availableCategories: await Question.distinct('category')
+        availableCategories: await Question.distinct('category').catch(() => [])
       });
     }
     
@@ -492,7 +569,7 @@ app.post('/api/register', async (req, res) => {
 });
 
 // Get Quiz Questions
-app.get('/api/quiz/questions/:category', async (req, res) => {
+app.get('/api/quiz/questions/:category', checkDbConnection, async (req, res) => {
   try {
     const { category } = req.params;
     
@@ -545,7 +622,7 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
 });
 
 // Submit Quiz
-app.post('/api/quiz/submit', async (req, res) => {
+app.post('/api/quiz/submit', checkDbConnection, async (req, res) => {
   try {
     console.log('📊 Quiz submission received');
     
@@ -633,7 +710,7 @@ app.post('/api/quiz/submit', async (req, res) => {
 });
 
 // Get Categories
-app.get('/api/categories', async (req, res) => {
+app.get('/api/categories', checkDbConnection, async (req, res) => {
   try {
     const dbCategories = await Question.distinct('category');
     
@@ -664,7 +741,7 @@ app.get('/api/categories', async (req, res) => {
 });
 
 // Get Config
-app.get('/api/config', async (req, res) => {
+app.get('/api/config', checkDbConnection, async (req, res) => {
   try {
     const config = await Config.findOne() || {
       quizTime: 30,
@@ -688,7 +765,7 @@ app.get('/api/config', async (req, res) => {
 });
 
 // Update Config (Admin only)
-app.put('/api/config', verifyToken, async (req, res) => {
+app.put('/api/config', verifyToken, checkDbConnection, async (req, res) => {
   try {
     const { quizTime, passingPercentage, totalQuestions } = req.body;
     
@@ -727,7 +804,7 @@ app.put('/api/config', verifyToken, async (req, res) => {
 // ========== ADMIN ROUTES ==========
 
 // Dashboard Stats
-app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
+app.get('/api/admin/dashboard', verifyToken, checkDbConnection, async (req, res) => {
   try {
     const totalStudents = await User.countDocuments();
     const totalQuestions = await Question.countDocuments();
@@ -778,7 +855,7 @@ app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
 });
 
 // Get All Questions (Admin)
-app.get('/api/admin/questions', verifyToken, async (req, res) => {
+app.get('/api/admin/questions', verifyToken, checkDbConnection, async (req, res) => {
   try {
     const { category, page = 1, limit = 100, search = '' } = req.query;
     
@@ -821,7 +898,7 @@ app.get('/api/admin/questions', verifyToken, async (req, res) => {
 });
 
 // Add Question (Admin)
-app.post('/api/admin/questions', verifyToken, async (req, res) => {
+app.post('/api/admin/questions', verifyToken, checkDbConnection, async (req, res) => {
   try {
     const { category, questionText, options, marks, difficulty } = req.body;
     
@@ -878,7 +955,7 @@ app.post('/api/admin/questions', verifyToken, async (req, res) => {
 });
 
 // Delete Question (Admin)
-app.delete('/api/admin/questions/:id', verifyToken, async (req, res) => {
+app.delete('/api/admin/questions/:id', verifyToken, checkDbConnection, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -907,7 +984,7 @@ app.delete('/api/admin/questions/:id', verifyToken, async (req, res) => {
 });
 
 // Get Results (Admin)
-app.get('/api/admin/results', verifyToken, async (req, res) => {
+app.get('/api/admin/results', verifyToken, checkDbConnection, async (req, res) => {
   try {
     const results = await User.find({ submittedAt: { $ne: null } })
       .sort({ submittedAt: -1 });
@@ -929,7 +1006,7 @@ app.get('/api/admin/results', verifyToken, async (req, res) => {
 });
 
 // Delete Result (Admin)
-app.delete('/api/admin/results/:id', verifyToken, async (req, res) => {
+app.delete('/api/admin/results/:id', verifyToken, checkDbConnection, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -958,7 +1035,7 @@ app.delete('/api/admin/results/:id', verifyToken, async (req, res) => {
 });
 
 // Delete All Results (Admin)
-app.delete('/api/admin/results', verifyToken, async (req, res) => {
+app.delete('/api/admin/results', verifyToken, checkDbConnection, async (req, res) => {
   try {
     await User.deleteMany({ submittedAt: { $ne: null } });
     
@@ -978,7 +1055,7 @@ app.delete('/api/admin/results', verifyToken, async (req, res) => {
 });
 
 // Get Registrations (Admin)
-app.get('/api/admin/registrations', verifyToken, async (req, res) => {
+app.get('/api/admin/registrations', verifyToken, checkDbConnection, async (req, res) => {
   try {
     const registrations = await Registration.find().sort({ registeredAt: -1 });
     
@@ -1034,7 +1111,7 @@ app.post('/admin/reset', async (req, res) => {
 });
 
 // Fix Questions Data (Admin)
-app.post('/api/admin/fix-questions', verifyToken, async (req, res) => {
+app.post('/api/admin/fix-questions', verifyToken, checkDbConnection, async (req, res) => {
   try {
     const { category } = req.body;
     
@@ -1070,36 +1147,29 @@ app.post('/api/admin/fix-questions', verifyToken, async (req, res) => {
   }
 });
 
-// Get Database Status
-app.get('/api/db-status', async (req, res) => {
+// Test MongoDB Connection
+app.get('/api/test-mongodb', async (req, res) => {
   try {
-    const collections = await mongoose.connection.db.listCollections().toArray();
-    const collectionNames = collections.map(c => c.name);
-    
-    const stats = {
-      connectionState: mongoose.connection.readyState,
-      collections: collectionNames,
-      userCount: await User.countDocuments(),
-      questionCount: await Question.countDocuments(),
-      registrationCount: await Registration.countDocuments(),
-      adminCount: await Admin.countDocuments(),
-      configExists: !!(await Config.findOne())
-    };
+    // Test connection by pinging MongoDB
+    await mongoose.connection.db.admin().ping();
     
     res.json({
       success: true,
-      database: {
-        connected: mongoose.connection.readyState === 1,
-        state: mongoose.connection.readyState,
-        stats
-      }
+      message: 'MongoDB connection test successful',
+      connected: true,
+      host: mongoose.connection.host,
+      port: mongoose.connection.port,
+      database: mongoose.connection.name,
+      state: mongoose.connection.readyState
     });
   } catch (error) {
-    console.error('DB Status error:', error);
-    res.status(500).json({
+    res.json({
       success: false,
-      message: 'Error getting database status',
-      error: error.message
+      message: 'MongoDB connection test failed',
+      connected: false,
+      error: error.message,
+      state: mongoose.connection.readyState,
+      isDbConnected: isDbConnected
     });
   }
 });
@@ -1127,7 +1197,8 @@ app.use((req, res) => {
       '/api/admin/results',
       '/api/admin/registrations',
       '/api/admin/fix-questions',
-      '/api/db-status'
+      '/api/db-status',
+      '/api/test-mongodb'
     ]
   });
 });
@@ -1157,7 +1228,8 @@ app.use((err, req, res, next) => {
     success: false,
     message: 'Internal server error',
     error: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    isDbConnected: isDbConnected
   });
 });
 
@@ -1171,6 +1243,7 @@ app.listen(PORT, () => {
   console.log(`🌐 Production URL: https://backend-one-taupe-14.vercel.app`);
   console.log(`✅ CORS configured for multiple origins`);
   console.log(`✅ Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`✅ Database: ${isDbConnected ? 'Connected' : 'Disconnected'}`);
   console.log('='.repeat(50));
   console.log('📋 Available endpoints:');
   console.log('   GET  /                    - API Info');
@@ -1182,5 +1255,6 @@ app.listen(PORT, () => {
   console.log('   GET  /api/config          - Get Config');
   console.log('   GET  /api/categories      - Get Categories');
   console.log('   GET  /api/db-status       - Database Status');
+  console.log('   GET  /api/test-mongodb    - Test MongoDB Connection');
   console.log('='.repeat(50));
 });
