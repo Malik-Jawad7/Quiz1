@@ -3,97 +3,85 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+require('dotenv').config();
 
 const app = express();
 
-// 详细的CORS配置
+// ==================== CONFIGURATION ====================
+const PORT = process.env.PORT || 5000;
+
+// UPDATED MONGODB CONNECTION STRING WITH APP NAME
+const MONGODB_URI = process.env.MONGODB_URI || 
+  'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority&appName=Cluster0';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'shamsi_institute_secret_key_2024';
+
+// ==================== CORS CONFIGURATION ====================
 const corsOptions = {
-  origin: (origin, callback) => {
-    // 允许的origin列表
-    const allowedOrigins = [
-      'https://quiz2-iota-one.vercel.app',
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-      'http://localhost:5174',
-      'http://127.0.0.1:5174',
-      'http://localhost:5175',
-      'http://127.0.0.1:5175'
-    ];
-    
-    // 对于开发环境，允许没有origin的请求（如Postman、curl）
-    if (!origin && process.env.NODE_ENV === 'development') {
-      return callback(null, true);
-    }
-    
-    // 检查origin是否在允许列表中
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      console.log('⚠️ CORS blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: '*', // Allow all origins
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'X-Requested-With',
-    'Accept',
-    'Origin',
-    'Access-Control-Request-Method',
-    'Access-Control-Request-Headers',
-    'X-API-Key'
-  ],
-  exposedHeaders: [
-    'Content-Range',
-    'X-Content-Range',
-    'Access-Control-Allow-Origin',
-    'Access-Control-Allow-Credentials'
-  ],
-  maxAge: 86400, // 24小时
-  preflightContinue: false,
-  optionsSuccessStatus: 204
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
 };
 
-// 应用CORS中间件
 app.use(cors(corsOptions));
-
-// 显式处理OPTIONS预检请求
-app.options('*', cors(corsOptions));
-
-// 请求日志中间件
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
-  console.log('Origin:', req.headers.origin);
-  console.log('Headers:', req.headers);
-  next();
-});
-
 app.use(express.json());
 
-// MongoDB Connection
-const MONGODB_URI = 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
+// ==================== MONGODB CONNECTION ====================
+console.log('🔗 Attempting MongoDB Connection...');
+console.log('📡 Connection String:', MONGODB_URI.replace(/\/\/[^@]+@/, '//***:***@'));
 
-console.log('🔗 Connecting to MongoDB...');
+// Improved MongoDB connection with better error handling
+const connectDB = async () => {
+  try {
+    await mongoose.connect(MONGODB_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      serverSelectionTimeoutMS: 10000, // Increased timeout
+      socketTimeoutMS: 45000,
+      maxPoolSize: 10,
+    });
+    
+    console.log('✅ MongoDB Connected Successfully!');
+    console.log('📊 Database Name:', mongoose.connection.db.databaseName);
+    console.log('📈 Connection State:', getConnectionState());
+    
+    // Setup connection events
+    mongoose.connection.on('error', (err) => {
+      console.error('❌ MongoDB Connection Error:', err.message);
+    });
+    
+    mongoose.connection.on('disconnected', () => {
+      console.log('⚠️ MongoDB Disconnected. Attempting to reconnect...');
+    });
+    
+    mongoose.connection.on('connected', () => {
+      console.log('✅ MongoDB Reconnected');
+    });
+    
+    // Initialize database
+    await initializeDatabase();
+    
+  } catch (error) {
+    console.error('❌ MongoDB Connection Failed:', error.message);
+    console.error('💡 Error Details:', error);
+    console.log('🔄 Retrying connection in 5 seconds...');
+    
+    // Retry connection after 5 seconds
+    setTimeout(connectDB, 5000);
+  }
+};
 
-mongoose.connect(MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 5000,
-  socketTimeoutMS: 45000,
-})
-.then(() => {
-  console.log('✅ MongoDB Connected Successfully!');
-  console.log('📊 Database: quiz_system');
-  initializeDatabase();
-})
-.catch(err => {
-  console.error('❌ MongoDB Connection Failed:', err.message);
-});
+// Helper function to get connection state
+const getConnectionState = () => {
+  const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+  return states[mongoose.connection.readyState];
+};
 
-// Database schemas
+// Start the connection
+connectDB();
+
+// ==================== DATABASE SCHEMAS ====================
 const userSchema = new mongoose.Schema({
   name: String,
   rollNumber: String,
@@ -110,14 +98,14 @@ const userSchema = new mongoose.Schema({
   cheatingDetected: Boolean,
   isAutoSubmitted: Boolean,
   submittedAt: { type: Date, default: Date.now }
-});
+}, { timestamps: true });
 
 const registrationSchema = new mongoose.Schema({
   name: String,
   rollNumber: String,
   category: String,
   registeredAt: { type: Date, default: Date.now }
-});
+}, { timestamps: true });
 
 const questionSchema = new mongoose.Schema({
   category: String,
@@ -129,22 +117,22 @@ const questionSchema = new mongoose.Schema({
   marks: { type: Number, default: 1 },
   difficulty: { type: String, default: 'medium' },
   createdAt: { type: Date, default: Date.now }
-});
+}, { timestamps: true });
 
 const adminSchema = new mongoose.Schema({
-  username: { type: String, unique: true },
-  password: String,
+  username: { type: String, unique: true, required: true },
+  password: { type: String, required: true },
   email: String,
   role: { type: String, default: 'admin' },
   createdAt: { type: Date, default: Date.now }
-});
+}, { timestamps: true });
 
 const configSchema = new mongoose.Schema({
   quizTime: { type: Number, default: 30 },
   passingPercentage: { type: Number, default: 40 },
   totalQuestions: { type: Number, default: 50 },
   updatedAt: { type: Date, default: Date.now }
-});
+}, { timestamps: true });
 
 // Create models
 const User = mongoose.model('User', userSchema);
@@ -153,31 +141,28 @@ const Question = mongoose.model('Question', questionSchema);
 const Admin = mongoose.model('Admin', adminSchema);
 const Config = mongoose.model('Config', configSchema);
 
-// JWT Secret
-const JWT_SECRET = 'shamsi_institute_secret_key_2024';
-
-// Initialize Database
+// ==================== DATABASE INITIALIZATION ====================
 async function initializeDatabase() {
   try {
     console.log('🔄 Initializing database...');
     
-    // Clear existing admin and create fresh
-    await Admin.deleteMany({ username: 'admin' });
-    console.log('🗑️ Cleared existing admin user');
+    // Check if admin exists
+    const adminExists = await Admin.findOne({ username: 'admin' });
+    if (!adminExists) {
+      const hashedPassword = await bcrypt.hash('admin123', 10);
+      await Admin.create({
+        username: 'admin',
+        password: hashedPassword,
+        email: 'admin@shamsi.edu.pk',
+        role: 'superadmin'
+      });
+      console.log('✅ Default admin created');
+      console.log('   👤 Username: admin');
+      console.log('   🔑 Password: admin123');
+    } else {
+      console.log('✅ Admin already exists');
+    }
     
-    // Create new admin with fresh hash
-    const hashedPassword = await bcrypt.hash('admin123', 10);
-    console.log('🔐 Created hash for password: admin123');
-    
-    await Admin.create({
-      username: 'admin',
-      password: hashedPassword,
-      email: 'admin@shamsi.edu.pk',
-      role: 'superadmin'
-    });
-    
-    console.log('✅ Default admin created (username: admin, password: admin123)');
-
     // Check if config exists
     const configExists = await Config.findOne();
     if (!configExists) {
@@ -187,19 +172,28 @@ async function initializeDatabase() {
         totalQuestions: 50
       });
       console.log('✅ Default config created');
+    } else {
+      console.log('✅ Config already exists');
     }
-
-    // NO SAMPLE QUESTIONS - Database starts empty
+    
+    // Get counts
     const questionCount = await Question.countDocuments();
-    console.log(`📊 Total questions in database: ${questionCount}`);
-
+    const userCount = await User.countDocuments();
+    const adminCount = await Admin.countDocuments();
+    
+    console.log('📊 Database Statistics:');
+    console.log(`   Questions: ${questionCount}`);
+    console.log(`   Users: ${userCount}`);
+    console.log(`   Admins: ${adminCount}`);
+    
     console.log('✅ Database initialization complete');
+    
   } catch (error) {
-    console.error('Error initializing database:', error);
+    console.error('❌ Database initialization error:', error.message);
   }
 }
 
-// Middleware to verify JWT token
+// ==================== MIDDLEWARE ====================
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -225,43 +219,79 @@ const verifyToken = (req, res, next) => {
 
 // ==================== ROUTES ====================
 
-// Root endpoint with detailed CORS headers
+// Root endpoint with database status
 app.get('/', (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  const dbStatus = getConnectionState();
+  const isConnected = dbStatus === 'connected';
   
   res.json({
     success: true,
     message: '🚀 Shamsi Institute Quiz System API',
     version: '2.0.0',
-    database: mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Disconnected ❌',
+    database: isConnected ? 'Connected ✅' : `Disconnected ❌ (${dbStatus})`,
     timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
     endpoints: {
       health: 'GET /api/health',
+      dbStatus: 'GET /api/db-status',
       register: 'POST /api/register',
       adminLogin: 'POST /admin/login',
       quizQuestions: 'GET /api/quiz/questions/:category',
       submitQuiz: 'POST /api/quiz/submit',
       config: 'GET /api/config',
-      categories: 'GET /api/categories'
-    },
-    cors: {
-      allowedOrigins: corsOptions.origin.toString(),
-      methods: corsOptions.methods,
-      credentials: corsOptions.credentials
+      categories: 'GET /api/categories',
+      adminDashboard: 'GET /api/admin/dashboard (protected)'
     }
   });
 });
 
-// Health check with CORS headers
+// Database status endpoint
+app.get('/api/db-status', async (req, res) => {
+  try {
+    const dbStatus = getConnectionState();
+    const isConnected = dbStatus === 'connected';
+    
+    let stats = {};
+    if (isConnected) {
+      stats = {
+        questions: await Question.countDocuments(),
+        users: await User.countDocuments(),
+        admins: await Admin.countDocuments(),
+        configs: await Config.countDocuments()
+      };
+    }
+    
+    res.json({
+      success: true,
+      database: {
+        status: dbStatus,
+        connected: isConnected,
+        connectionString: MONGODB_URI.replace(/\/\/[^@]+@/, '//***:***@'),
+        stats: stats
+      }
+    });
+    
+  } catch (error) {
+    res.json({
+      success: false,
+      database: {
+        status: getConnectionState(),
+        connected: false,
+        error: error.message
+      }
+    });
+  }
+});
+
+// Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  const dbStatus = getConnectionState();
+  const isConnected = dbStatus === 'connected';
   
   res.json({
     success: true,
     message: '✅ Server is running',
-    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+    database: isConnected ? 'Connected' : `Disconnected (${dbStatus})`,
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     nodeVersion: process.version,
@@ -269,73 +299,62 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Debug endpoint to check admin
-app.get('/admin/debug', async (req, res) => {
-  try {
-    const admins = await Admin.find({});
-    
-    res.json({
-      success: true,
-      adminCount: admins.length,
-      admins: admins.map(a => ({
-        username: a.username,
-        email: a.email,
-        role: a.role,
-        hasPassword: !!a.password
-      }))
-    });
-  } catch (error) {
-    console.error('Debug error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Admin Login with CORS - FIXED VERSION
+// Admin Login
 app.post('/admin/login', async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
   try {
     const { username, password } = req.body;
     
-    console.log('🔐 Admin login attempt:', username);
-    
-    // TEMPORARY FIX: Hardcoded credentials for testing
-    if (username === 'admin' && password === 'admin123') {
-      const token = jwt.sign(
-        { 
-          id: 'admin-id-001',
-          username: 'admin', 
-          role: 'superadmin'
-        },
-        JWT_SECRET,
-        { expiresIn: '24h' }
-      );
-      
-      return res.json({
-        success: true,
-        message: 'Login successful',
-        token,
-        user: {
-          username: 'admin',
-          role: 'superadmin'
-        }
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username and password are required'
       });
     }
     
-    // Check in database (fallback)
+    console.log('🔐 Admin login attempt for:', username);
+    
+    // Check database connection first
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database not connected. Please try again later.'
+      });
+    }
+    
+    // Find admin
     const admin = await Admin.findOne({ username });
     
     if (!admin) {
+      // Fallback: If no admin in DB, use default credentials
+      if (username === 'admin' && password === 'admin123') {
+        const token = jwt.sign(
+          { 
+            id: 'default-admin-id',
+            username: 'admin', 
+            role: 'superadmin'
+          },
+          JWT_SECRET,
+          { expiresIn: '24h' }
+        );
+        
+        return res.json({
+          success: true,
+          message: 'Login successful (default credentials)',
+          token,
+          user: {
+            username: 'admin',
+            role: 'superadmin'
+          }
+        });
+      }
+      
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
       });
     }
     
+    // Verify password
     const validPassword = await bcrypt.compare(password, admin.password);
     if (!validPassword) {
       return res.status(401).json({
@@ -344,6 +363,7 @@ app.post('/admin/login', async (req, res) => {
       });
     }
     
+    // Create token
     const token = jwt.sign(
       { 
         id: admin._id, 
@@ -354,7 +374,9 @@ app.post('/admin/login', async (req, res) => {
       { expiresIn: '24h' }
     );
     
-    return res.json({
+    console.log('✅ Admin login successful:', username);
+    
+    res.json({
       success: true,
       message: 'Login successful',
       token,
@@ -374,15 +396,10 @@ app.post('/admin/login', async (req, res) => {
   }
 });
 
-// Register student with CORS
+// Register Student
 app.post('/api/register', async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
   try {
     const { name, rollNumber, category } = req.body;
-    
-    console.log('📝 Registration attempt:', { name, rollNumber, category });
     
     // Validation
     if (!name || !rollNumber || !category) {
@@ -406,13 +423,11 @@ app.post('/api/register', async (req, res) => {
       });
     }
     
-    // Check if category has questions
-    const questionCount = await Question.countDocuments({ category: category.toLowerCase() });
-    if (questionCount === 0) {
-      return res.status(400).json({
+    // Check database connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(500).json({
         success: false,
-        message: `No questions available for "${category}" category.`,
-        availableCategories: await Question.distinct('category')
+        message: 'Database not connected. Please try again later.'
       });
     }
     
@@ -425,7 +440,7 @@ app.post('/api/register', async (req, res) => {
     
     await registration.save();
     
-    console.log('✅ Registration successful for:', name);
+    console.log('✅ Registration successful:', name);
     
     res.json({
       success: true,
@@ -448,44 +463,58 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// Get quiz questions with CORS
+// Get Quiz Questions
 app.get('/api/quiz/questions/:category', async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
   try {
     const { category } = req.params;
+    const lowercaseCategory = category.toLowerCase();
     
-    console.log('📚 Fetching questions for category:', category);
+    console.log('📚 Fetching questions for category:', lowercaseCategory);
     
-    let questions = [];
-    let config = { quizTime: 30, passingPercentage: 40, totalQuestions: 50 };
-    
-    questions = await Question.find({ category: category.toLowerCase() });
-    
-    const dbConfig = await Config.findOne();
-    if (dbConfig) {
-      config = dbConfig;
+    // Check database connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database not connected. Please try again later.'
+      });
     }
+    
+    // Get questions
+    const questions = await Question.find({ category: lowercaseCategory });
     
     if (questions.length === 0) {
       return res.status(404).json({
         success: false,
-        message: `No questions found for ${category} category. Please contact administrator.`
+        message: `No questions found for ${category} category.`
       });
     }
     
-    // Shuffle questions and limit based on config
+    // Get config
+    const config = await Config.findOne() || {
+      quizTime: 30,
+      passingPercentage: 40,
+      totalQuestions: 50
+    };
+    
+    // Shuffle and limit questions
     const shuffledQuestions = questions.sort(() => 0.5 - Math.random());
     const limitedQuestions = shuffledQuestions.slice(0, Math.min(config.totalQuestions, shuffledQuestions.length));
     
+    // Hide correct answers for students
+    const safeQuestions = limitedQuestions.map(q => ({
+      _id: q._id,
+      category: q.category,
+      questionText: q.questionText,
+      options: q.options.map(opt => ({ text: opt.text })),
+      marks: q.marks,
+      difficulty: q.difficulty,
+      createdAt: q.createdAt
+    }));
+    
     res.json({
       success: true,
-      questions: limitedQuestions.map(q => ({
-        ...q._doc,
-        options: q.options.map(opt => ({ text: opt.text, isCorrect: false })) // Hide correct answers
-      })),
-      count: limitedQuestions.length,
+      questions: safeQuestions,
+      count: safeQuestions.length,
       config: {
         quizTime: config.quizTime,
         passingPercentage: config.passingPercentage,
@@ -494,7 +523,7 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Get quiz questions error:', error);
+    console.error('Get questions error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching questions',
@@ -503,14 +532,9 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
   }
 });
 
-// Submit quiz with CORS - FIXED VERSION
+// Submit Quiz
 app.post('/api/quiz/submit', async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
   try {
-    console.log('📊 Quiz submission received:', req.body);
-    
     const { 
       rollNumber, 
       name, 
@@ -526,42 +550,31 @@ app.post('/api/quiz/submit', async (req, res) => {
       isAutoSubmitted
     } = req.body;
     
-    // Validate required fields
+    // Validation
     if (!rollNumber || !name || !category) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: rollNumber, name, category'
+        message: 'Missing required fields'
       });
     }
     
-    console.log('📝 Processing quiz result:', {
-      name,
-      rollNumber,
-      category,
-      score,
-      percentage,
-      totalQuestions,
-      correctAnswers
-    });
-    
-    // Get or create config for passing percentage
-    let config = await Config.findOne();
-    if (!config) {
-      config = await Config.create({
-        quizTime: 30,
-        passingPercentage: 40,
-        totalQuestions: 50
+    // Check database connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database not connected. Please try again later.'
       });
     }
     
-    // Use the provided passingPercentage or get from config
+    // Get config for passing percentage
+    const config = await Config.findOne() || { passingPercentage: 40 };
     const finalPassingPercentage = passingPercentage || config.passingPercentage;
     const finalPassed = percentage >= finalPassingPercentage;
     
-    // Format roll number with SI- prefix
+    // Format roll number
     const formattedRollNumber = rollNumber.startsWith('SI-') ? rollNumber : `SI-${rollNumber}`;
     
-    // Save to database - FIXED FIELDS
+    // Save result
     const user = new User({
       name,
       rollNumber: formattedRollNumber,
@@ -576,13 +589,12 @@ app.post('/api/quiz/submit', async (req, res) => {
       passingPercentage: finalPassingPercentage,
       passed: finalPassed,
       cheatingDetected: cheatingDetected || false,
-      isAutoSubmitted: isAutoSubmitted || false,
-      submittedAt: new Date()
+      isAutoSubmitted: isAutoSubmitted || false
     });
     
     await user.save();
     
-    console.log('✅ Quiz result saved successfully for:', name);
+    console.log('✅ Quiz submitted successfully:', name);
     
     res.json({
       success: true,
@@ -604,22 +616,74 @@ app.post('/api/quiz/submit', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Submit quiz error:', error);
+    console.error('Submit quiz error:', error);
     res.status(500).json({
       success: false,
       message: 'Error submitting quiz',
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: error.message
     });
   }
 });
 
-// Get categories with CORS
-app.get('/api/categories', async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
+// Get Config
+app.get('/api/config', async (req, res) => {
   try {
+    // Check database connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({
+        success: false,
+        config: {
+          quizTime: 30,
+          passingPercentage: 40,
+          totalQuestions: 50
+        },
+        message: 'Using default config (database not connected)'
+      });
+    }
+    
+    const config = await Config.findOne() || {
+      quizTime: 30,
+      passingPercentage: 40,
+      totalQuestions: 50
+    };
+    
+    res.json({
+      success: true,
+      config
+    });
+    
+  } catch (error) {
+    console.error('Get config error:', error);
+    res.json({
+      success: false,
+      config: {
+        quizTime: 30,
+        passingPercentage: 40,
+        totalQuestions: 50
+      },
+      message: 'Using default config (error)'
+    });
+  }
+});
+
+// Get Categories
+app.get('/api/categories', async (req, res) => {
+  try {
+    // Check database connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({
+        success: false,
+        categories: [
+          { value: 'html', label: 'HTML', questionCount: 0 },
+          { value: 'css', label: 'CSS', questionCount: 0 },
+          { value: 'javascript', label: 'JavaScript', questionCount: 0 },
+          { value: 'react', label: 'React.js', questionCount: 0 },
+          { value: 'node', label: 'Node.js', questionCount: 0 }
+        ],
+        message: 'Using default categories (database not connected)'
+      });
+    }
+    
     const dbCategories = await Question.distinct('category');
     
     const categories = await Promise.all(
@@ -640,102 +704,41 @@ app.get('/api/categories', async (req, res) => {
     
   } catch (error) {
     console.error('Get categories error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching categories',
-      error: error.message
-    });
-  }
-});
-
-// Get config with CORS
-app.get('/api/config', async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
-  try {
-    let config = {
-      quizTime: 30,
-      passingPercentage: 40,
-      totalQuestions: 50
-    };
-    
-    const dbConfig = await Config.findOne();
-    if (dbConfig) {
-      config = dbConfig;
-    }
-    
     res.json({
-      success: true,
-      config
-    });
-    
-  } catch (error) {
-    console.error('Get config error:', error);
-    res.status(500).json({
       success: false,
-      message: 'Error fetching config',
-      error: error.message
+      categories: [
+        { value: 'html', label: 'HTML', questionCount: 0 },
+        { value: 'css', label: 'CSS', questionCount: 0 },
+        { value: 'javascript', label: 'JavaScript', questionCount: 0 },
+        { value: 'react', label: 'React.js', questionCount: 0 },
+        { value: 'node', label: 'Node.js', questionCount: 0 }
+      ],
+      message: 'Using default categories (error)'
     });
   }
 });
 
-// Update config (admin only) with CORS
-app.put('/api/config', verifyToken, async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
+// ==================== ADMIN PROTECTED ROUTES ====================
+
+// Dashboard Stats
+app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
   try {
-    const { quizTime, passingPercentage, totalQuestions } = req.body;
-    
-    let config = await Config.findOne();
-    
-    if (config) {
-      config.quizTime = quizTime || config.quizTime;
-      config.passingPercentage = passingPercentage || config.passingPercentage;
-      config.totalQuestions = totalQuestions || config.totalQuestions;
-      config.updatedAt = new Date();
-      await config.save();
-    } else {
-      config = await Config.create({
-        quizTime: quizTime || 30,
-        passingPercentage: passingPercentage || 40,
-        totalQuestions: totalQuestions || 50
+    // Check database connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database not connected'
       });
     }
     
-    res.json({
-      success: true,
-      message: 'Config updated successfully',
-      config
-    });
-    
-  } catch (error) {
-    console.error('Update config error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error updating config',
-      error: error.message
-    });
-  }
-});
-
-// === ADMIN ROUTES with CORS ===
-
-// Dashboard stats with CORS
-app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
-  try {
     const totalStudents = await User.countDocuments();
     const totalQuestions = await Question.countDocuments();
-    const totalAttempts = await User.countDocuments({ submittedAt: { $ne: null } });
+    const totalAttempts = await User.countDocuments();
     
     let averageScore = 0;
     let passRate = 0;
     
-    const results = await User.find({ submittedAt: { $ne: null } });
+    const results = await User.find();
     if (results.length > 0) {
       const totalPercentage = results.reduce((sum, r) => sum + (r.percentage || 0), 0);
       averageScore = totalPercentage / results.length;
@@ -776,16 +779,13 @@ app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
   }
 });
 
-// Get all questions (admin) with CORS
+// Get All Questions (Admin)
 app.get('/api/admin/questions', verifyToken, async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
   try {
-    const { category, page = 1, limit = 100, search = '' } = req.query;
+    const { category = 'all', search = '', page = 1, limit = 100 } = req.query;
     
     let query = {};
-    if (category && category !== 'all') {
+    if (category !== 'all') {
       query.category = category;
     }
     
@@ -822,14 +822,12 @@ app.get('/api/admin/questions', verifyToken, async (req, res) => {
   }
 });
 
-// Add question (admin) with CORS
+// Add Question (Admin)
 app.post('/api/admin/questions', verifyToken, async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
   try {
     const { category, questionText, options, marks, difficulty } = req.body;
     
+    // Validation
     if (!category || !questionText || !options || options.length < 2) {
       return res.status(400).json({
         success: false,
@@ -879,11 +877,8 @@ app.post('/api/admin/questions', verifyToken, async (req, res) => {
   }
 });
 
-// Delete question (admin) with CORS
+// Delete Question (Admin)
 app.delete('/api/admin/questions/:id', verifyToken, async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
   try {
     const { id } = req.params;
     
@@ -911,13 +906,10 @@ app.delete('/api/admin/questions/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Get results (admin) with CORS
+// Get Results (Admin)
 app.get('/api/admin/results', verifyToken, async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
   try {
-    const results = await User.find({ submittedAt: { $ne: null } })
+    const results = await User.find()
       .sort({ submittedAt: -1 });
     
     res.json({
@@ -936,11 +928,8 @@ app.get('/api/admin/results', verifyToken, async (req, res) => {
   }
 });
 
-// Delete result (admin) with CORS
+// Delete Result (Admin)
 app.delete('/api/admin/results/:id', verifyToken, async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
   try {
     const { id } = req.params;
     
@@ -968,13 +957,10 @@ app.delete('/api/admin/results/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Delete all results (admin) with CORS
+// Delete All Results (Admin)
 app.delete('/api/admin/results', verifyToken, async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
   try {
-    await User.deleteMany({ submittedAt: { $ne: null } });
+    await User.deleteMany({});
     
     res.json({
       success: true,
@@ -991,55 +977,58 @@ app.delete('/api/admin/results', verifyToken, async (req, res) => {
   }
 });
 
-// Get registrations (admin) with CORS
-app.get('/api/admin/registrations', verifyToken, async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
+// Update Config (Admin)
+app.put('/api/config', verifyToken, async (req, res) => {
   try {
-    const registrations = await Registration.find().sort({ registeredAt: -1 });
+    const { quizTime, passingPercentage, totalQuestions } = req.body;
+    
+    let config = await Config.findOne();
+    
+    if (config) {
+      config.quizTime = quizTime || config.quizTime;
+      config.passingPercentage = passingPercentage || config.passingPercentage;
+      config.totalQuestions = totalQuestions || config.totalQuestions;
+      config.updatedAt = new Date();
+      await config.save();
+    } else {
+      config = await Config.create({
+        quizTime: quizTime || 30,
+        passingPercentage: passingPercentage || 40,
+        totalQuestions: totalQuestions || 50
+      });
+    }
     
     res.json({
       success: true,
-      registrations,
-      count: registrations.length
+      message: 'Config updated successfully',
+      config
     });
     
   } catch (error) {
-    console.error('Get registrations error:', error);
+    console.error('Update config error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching registrations',
+      message: 'Error updating config',
       error: error.message
     });
   }
 });
 
-// Initialize database (for testing) with CORS
-app.get('/api/init-db', verifyToken, async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
-  try {
-    await initializeDatabase();
-    res.json({
-      success: true,
-      message: 'Database initialized successfully'
-    });
-  } catch (error) {
-    console.error('Init database error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error initializing database',
-      error: error.message
-    });
-  }
-});
-
-// Reset admin endpoint (for emergencies)
+// Reset Admin
 app.post('/admin/reset', async (req, res) => {
   try {
-    await initializeDatabase();
+    // Delete existing admin
+    await Admin.deleteMany({ username: 'admin' });
+    
+    // Create new admin
+    const hashedPassword = await bcrypt.hash('admin123', 10);
+    await Admin.create({
+      username: 'admin',
+      password: hashedPassword,
+      email: 'admin@shamsi.edu.pk',
+      role: 'superadmin'
+    });
+    
     res.json({
       success: true,
       message: 'Admin reset successfully. Use username: admin, password: admin123'
@@ -1053,68 +1042,29 @@ app.post('/admin/reset', async (req, res) => {
   }
 });
 
-// 404 Handler with CORS
+// ==================== ERROR HANDLING ====================
 app.use((req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
   res.status(404).json({
     success: false,
     message: 'Route not found',
     requestedUrl: req.originalUrl,
-    method: req.method,
-    availableEndpoints: [
-      '/',
-      '/api/health',
-      '/api/register',
-      '/admin/login',
-      '/api/quiz/questions/:category',
-      '/api/quiz/submit',
-      '/api/config',
-      '/api/categories',
-      '/api/admin/dashboard',
-      '/api/admin/questions',
-      '/api/admin/results',
-      '/api/admin/registrations'
-    ]
+    method: req.method
   });
 });
 
-// Error handling middleware with CORS
 app.use((err, req, res, next) => {
   console.error('Global error:', err);
-  
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
-  // Handle CORS errors
-  if (err.message.includes('CORS')) {
-    return res.status(403).json({
-      success: false,
-      message: 'CORS Error: ' + err.message,
-      origin: req.headers.origin,
-      allowedOrigins: corsOptions.origin.toString()
-    });
-  }
-  
   res.status(500).json({
     success: false,
     message: 'Internal server error',
-    error: err.message,
-    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    error: err.message
   });
 });
 
-// Start server
-const PORT = process.env.PORT || 5000;
+// ==================== START SERVER ====================
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌐 Backend URL: http://localhost:${PORT}`);
-  console.log(`🌐 Production URL: https://backend-one-taupe-14.vercel.app`);
-  console.log(`✅ CORS enabled for origins:`);
-  console.log(`   - https://quiz2-iota-one.vercel.app`);
-  console.log(`   - http://localhost:3000`);
-  console.log(`   - http://localhost:5173`);
-  console.log(`   - http://127.0.0.1:5173`);
-  console.log(`📡 Ready to accept requests...`);
+  console.log(`🌐 URL: http://localhost:${PORT}`);
+  console.log('✅ CORS enabled for all origins');
+  console.log('📡 MongoDB Status:', getConnectionState());
 });
