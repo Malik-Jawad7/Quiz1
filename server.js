@@ -9,7 +9,7 @@ const app = express();
 // ==================== CONFIGURATION ====================
 const PORT = process.env.PORT || 5000;
 
-// Use environment variables
+// Use environment variables or fallback
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
 const JWT_SECRET = process.env.JWT_SECRET || 'shamsi_institute_secret_key_2024';
 
@@ -24,44 +24,43 @@ app.use(express.json());
 
 // ==================== MONGODB CONNECTION ====================
 console.log('🔗 Attempting MongoDB Connection...');
+console.log('📡 Connection String (masked):', MONGODB_URI ? MONGODB_URI.replace(/\/\/[^@]+@/, '//***:***@') : 'Not found');
 
-// Improved MongoDB connection with better error handling
+// Set mongoose settings
+mongoose.set('strictQuery', false);
+
+// Improved MongoDB connection with error handling
 const connectDB = async () => {
   try {
-    // Clear any existing connections first
+    // If already connected, return
     if (mongoose.connection.readyState === 1) {
       console.log('✅ Already connected to MongoDB');
-      return;
+      return mongoose.connection;
     }
 
-    // Close any existing connection
+    // Close existing connection if any
     if (mongoose.connection.readyState !== 0) {
       await mongoose.disconnect();
     }
 
-    console.log('📡 Connecting with URI:', MONGODB_URI.replace(/\/\/[^@]+@/, '//***:***@'));
+    console.log('🔄 Connecting to MongoDB...');
     
-    await mongoose.connect(MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 30000, // Increased timeout to 30 seconds
-      socketTimeoutMS: 45000,
-      maxPoolSize: 10,
-      retryWrites: true,
-      w: 'majority'
-    });
+    // SIMPLIFIED CONNECTION - remove extra options
+    await mongoose.connect(MONGODB_URI);
     
     console.log('✅ MongoDB Connected Successfully!');
-    console.log('📊 Database Name:', mongoose.connection.db?.databaseName || 'Unknown');
+    console.log('📊 Database Name:', mongoose.connection.db?.databaseName || 'quiz_system');
     console.log('📈 Connection State:', getConnectionState());
     
-    // Setup connection events
+    // Connection events
     mongoose.connection.on('error', (err) => {
       console.error('❌ MongoDB Connection Error:', err.message);
     });
     
     mongoose.connection.on('disconnected', () => {
       console.log('⚠️ MongoDB Disconnected');
+      console.log('🔄 Attempting to reconnect in 5 seconds...');
+      setTimeout(connectDB, 5000);
     });
     
     mongoose.connection.on('reconnected', () => {
@@ -71,26 +70,26 @@ const connectDB = async () => {
     // Initialize database
     await initializeDatabase();
     
+    return mongoose.connection;
+    
   } catch (error) {
     console.error('❌ MongoDB Connection Failed:', error.message);
-    console.error('💡 Error Details:', {
-      name: error.name,
-      code: error.code,
-      message: error.message
-    });
+    console.error('💡 Error Type:', error.name);
     
-    // If it's an authentication error, check credentials
-    if (error.message.includes('bad auth') || error.message.includes('Authentication failed')) {
-      console.error('🔑 Authentication Error: Please check MongoDB username/password');
-    }
-    
-    // If it's a network error
-    if (error.name === 'MongoNetworkError') {
-      console.error('🌐 Network Error: Check your internet connection and MongoDB Atlas network access');
+    // Specific error handling
+    if (error.name === 'MongoParseError') {
+      console.error('🔧 Fix: Check your MongoDB connection string format');
+    } else if (error.name === 'MongoNetworkError') {
+      console.error('🌐 Fix: Check internet connection and MongoDB Atlas IP whitelist');
+      console.error('📝 Go to MongoDB Atlas → Network Access → Add IP Address: 0.0.0.0/0');
+    } else if (error.message.includes('bad auth') || error.message.includes('authentication')) {
+      console.error('🔑 Fix: Check MongoDB username/password');
     }
     
     console.log('🔄 Retrying connection in 10 seconds...');
     setTimeout(connectDB, 10000);
+    
+    return null;
   }
 };
 
@@ -100,7 +99,7 @@ const getConnectionState = () => {
   return states[mongoose.connection.readyState] || 'unknown';
 };
 
-// Start the connection
+// Start the connection immediately
 connectDB();
 
 // ==================== DATABASE SCHEMAS ====================
@@ -253,7 +252,8 @@ const checkDBConnection = (req, res, next) => {
     return res.status(503).json({
       success: false,
       message: 'Database not connected. Please try again later.',
-      databaseStatus: getConnectionState()
+      databaseStatus: getConnectionState(),
+      timestamp: new Date().toISOString()
     });
   }
   next();
@@ -283,9 +283,37 @@ app.get('/', (req, res) => {
       config: 'GET /api/config',
       categories: 'GET /api/categories',
       adminDashboard: 'GET /api/admin/dashboard (protected)',
-      resetAdmin: 'POST /admin/reset'
+      resetAdmin: 'POST /admin/reset',
+      testConnection: 'GET /api/test-connection'
     }
   });
+});
+
+// Test connection endpoint
+app.get('/api/test-connection', async (req, res) => {
+  try {
+    // Try to connect directly
+    const testConn = await mongoose.connect(MONGODB_URI);
+    const isConnected = testConn.connection.readyState === 1;
+    
+    res.json({
+      success: isConnected,
+      message: isConnected ? 'MongoDB Connection Successful!' : 'MongoDB Connection Failed',
+      connectionState: getConnectionState(),
+      connectionDetails: {
+        host: testConn.connection.host,
+        port: testConn.connection.port,
+        name: testConn.connection.name
+      }
+    });
+  } catch (error) {
+    res.json({
+      success: false,
+      message: 'Connection Test Failed',
+      error: error.message,
+      connectionString: MONGODB_URI.replace(/\/\/[^@]+@/, '//***:***@')
+    });
+  }
 });
 
 // Database status endpoint
@@ -296,13 +324,17 @@ app.get('/api/db-status', async (req, res) => {
     
     let stats = {};
     if (isConnected) {
-      stats = {
-        questions: await Question.countDocuments(),
-        users: await User.countDocuments(),
-        registrations: await Registration.countDocuments(),
-        admins: await Admin.countDocuments(),
-        configs: await Config.countDocuments()
-      };
+      try {
+        stats = {
+          questions: await Question.countDocuments(),
+          users: await User.countDocuments(),
+          registrations: await Registration.countDocuments(),
+          admins: await Admin.countDocuments(),
+          configs: await Config.countDocuments()
+        };
+      } catch (dbError) {
+        console.error('Error fetching stats:', dbError.message);
+      }
     }
     
     res.json({
@@ -310,13 +342,14 @@ app.get('/api/db-status', async (req, res) => {
       database: {
         status: dbStatus,
         connected: isConnected,
-        connectionString: MONGODB_URI.replace(/\/\/[^@]+@/, '//***:***@'),
+        connectionString: MONGODB_URI ? MONGODB_URI.replace(/\/\/[^@]+@/, '//***:***@') : 'Not set',
         stats: stats
       },
       server: {
         uptime: process.uptime(),
         memoryUsage: process.memoryUsage(),
-        nodeVersion: process.version
+        nodeVersion: process.version,
+        platform: process.platform
       }
     });
     
@@ -508,12 +541,27 @@ app.post('/api/register', checkDBConnection, async (req, res) => {
 });
 
 // Get Quiz Questions
-app.get('/api/quiz/questions/:category', checkDBConnection, async (req, res) => {
+app.get('/api/quiz/questions/:category', async (req, res) => {
   try {
     const { category } = req.params;
     const lowercaseCategory = category.toLowerCase();
     
     console.log('📚 Fetching questions for category:', lowercaseCategory);
+    
+    // Check DB connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({
+        success: true,
+        questions: [],
+        count: 0,
+        config: {
+          quizTime: 30,
+          passingPercentage: 40,
+          totalQuestions: 50
+        },
+        message: 'Database not connected. Using demo mode.'
+      });
+    }
     
     // Get questions
     const questions = await Question.find({ category: lowercaseCategory });
@@ -577,7 +625,7 @@ app.get('/api/quiz/questions/:category', checkDBConnection, async (req, res) => 
 });
 
 // Submit Quiz
-app.post('/api/quiz/submit', checkDBConnection, async (req, res) => {
+app.post('/api/quiz/submit', async (req, res) => {
   try {
     const { 
       rollNumber, 
@@ -599,6 +647,15 @@ app.post('/api/quiz/submit', checkDBConnection, async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Missing required fields'
+      });
+    }
+    
+    // Check DB connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database not connected. Cannot save result.',
+        data: req.body // Return the data so frontend can store locally
       });
     }
     
@@ -759,8 +816,28 @@ app.get('/api/categories', async (req, res) => {
 // ==================== ADMIN PROTECTED ROUTES ====================
 
 // Dashboard Stats
-app.get('/api/admin/dashboard', verifyToken, checkDBConnection, async (req, res) => {
+app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
   try {
+    // Check DB connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({
+        success: false,
+        message: 'Database not connected',
+        stats: {
+          totalStudents: 0,
+          totalQuestions: 0,
+          totalAttempts: 0,
+          totalRegistrations: 0,
+          averageScore: 0,
+          passRate: 0,
+          todayAttempts: 0,
+          todayRegistrations: 0,
+          quizTime: 30,
+          passingPercentage: 40
+        }
+      });
+    }
+    
     const totalStudents = await User.countDocuments();
     const totalQuestions = await Question.countDocuments();
     const totalAttempts = await User.countDocuments();
@@ -817,8 +894,20 @@ app.get('/api/admin/dashboard', verifyToken, checkDBConnection, async (req, res)
 });
 
 // Get All Questions (Admin)
-app.get('/api/admin/questions', verifyToken, checkDBConnection, async (req, res) => {
+app.get('/api/admin/questions', verifyToken, async (req, res) => {
   try {
+    // Check DB connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({
+        success: false,
+        message: 'Database not connected',
+        questions: [],
+        count: 0,
+        total: 0,
+        page: 1
+      });
+    }
+    
     const { category = 'all', search = '', page = 1, limit = 100 } = req.query;
     
     let query = {};
@@ -861,8 +950,16 @@ app.get('/api/admin/questions', verifyToken, checkDBConnection, async (req, res)
 });
 
 // Add Question (Admin)
-app.post('/api/admin/questions', verifyToken, checkDBConnection, async (req, res) => {
+app.post('/api/admin/questions', verifyToken, async (req, res) => {
   try {
+    // Check DB connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database not connected'
+      });
+    }
+    
     const { category, questionText, options, marks, difficulty } = req.body;
     
     // Validation
@@ -916,8 +1013,16 @@ app.post('/api/admin/questions', verifyToken, checkDBConnection, async (req, res
 });
 
 // Delete Question (Admin)
-app.delete('/api/admin/questions/:id', verifyToken, checkDBConnection, async (req, res) => {
+app.delete('/api/admin/questions/:id', verifyToken, async (req, res) => {
   try {
+    // Check DB connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database not connected'
+      });
+    }
+    
     const { id } = req.params;
     
     const question = await Question.findByIdAndDelete(id);
@@ -945,8 +1050,18 @@ app.delete('/api/admin/questions/:id', verifyToken, checkDBConnection, async (re
 });
 
 // Get Results (Admin)
-app.get('/api/admin/results', verifyToken, checkDBConnection, async (req, res) => {
+app.get('/api/admin/results', verifyToken, async (req, res) => {
   try {
+    // Check DB connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({
+        success: false,
+        message: 'Database not connected',
+        results: [],
+        count: 0
+      });
+    }
+    
     const results = await User.find()
       .sort({ submittedAt: -1 });
     
@@ -967,8 +1082,16 @@ app.get('/api/admin/results', verifyToken, checkDBConnection, async (req, res) =
 });
 
 // Delete Result (Admin)
-app.delete('/api/admin/results/:id', verifyToken, checkDBConnection, async (req, res) => {
+app.delete('/api/admin/results/:id', verifyToken, async (req, res) => {
   try {
+    // Check DB connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database not connected'
+      });
+    }
+    
     const { id } = req.params;
     
     const result = await User.findByIdAndDelete(id);
@@ -996,8 +1119,16 @@ app.delete('/api/admin/results/:id', verifyToken, checkDBConnection, async (req,
 });
 
 // Delete All Results (Admin)
-app.delete('/api/admin/results', verifyToken, checkDBConnection, async (req, res) => {
+app.delete('/api/admin/results', verifyToken, async (req, res) => {
   try {
+    // Check DB connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database not connected'
+      });
+    }
+    
     await User.deleteMany({});
     
     res.json({
@@ -1016,8 +1147,16 @@ app.delete('/api/admin/results', verifyToken, checkDBConnection, async (req, res
 });
 
 // Update Config (Admin)
-app.put('/api/config', verifyToken, checkDBConnection, async (req, res) => {
+app.put('/api/config', verifyToken, async (req, res) => {
   try {
+    // Check DB connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database not connected'
+      });
+    }
+    
     const { quizTime, passingPercentage, totalQuestions } = req.body;
     
     let config = await Config.findOne();
@@ -1090,8 +1229,18 @@ app.post('/admin/reset', async (req, res) => {
 });
 
 // Get Registrations (Admin)
-app.get('/api/admin/registrations', verifyToken, checkDBConnection, async (req, res) => {
+app.get('/api/admin/registrations', verifyToken, async (req, res) => {
   try {
+    // Check DB connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({
+        success: false,
+        message: 'Database not connected',
+        registrations: [],
+        count: 0
+      });
+    }
+    
     const registrations = await Registration.find()
       .sort({ registeredAt: -1 });
     
@@ -1106,6 +1255,62 @@ app.get('/api/admin/registrations', verifyToken, checkDBConnection, async (req, 
     res.status(500).json({
       success: false,
       message: 'Error fetching registrations',
+      error: error.message
+    });
+  }
+});
+
+// Add sample questions endpoint
+app.post('/api/admin/add-sample-questions', verifyToken, async (req, res) => {
+  try {
+    // Check DB connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database not connected'
+      });
+    }
+    
+    const sampleQuestions = [
+      {
+        category: 'html',
+        questionText: 'What does HTML stand for?',
+        options: [
+          { text: 'Hyper Text Markup Language', isCorrect: true },
+          { text: 'High Tech Modern Language', isCorrect: false },
+          { text: 'Hyper Transfer Markup Language', isCorrect: false },
+          { text: 'Home Tool Markup Language', isCorrect: false }
+        ],
+        marks: 1,
+        difficulty: 'easy'
+      },
+      {
+        category: 'css',
+        questionText: 'Which property is used to change the background color?',
+        options: [
+          { text: 'color', isCorrect: false },
+          { text: 'bgcolor', isCorrect: false },
+          { text: 'background-color', isCorrect: true },
+          { text: 'background', isCorrect: false }
+        ],
+        marks: 1,
+        difficulty: 'easy'
+      }
+    ];
+    
+    await Question.insertMany(sampleQuestions);
+    
+    res.json({
+      success: true,
+      message: 'Sample questions added successfully',
+      count: sampleQuestions.length
+    });
+    
+  } catch (error) {
+    console.error('Add sample questions error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error adding sample questions',
       error: error.message
     });
   }
@@ -1137,4 +1342,5 @@ app.listen(PORT, () => {
   console.log('✅ CORS enabled for all origins');
   console.log('📡 MongoDB Status:', getConnectionState());
   console.log('⚙️  Environment:', process.env.NODE_ENV || 'development');
+  console.log('📝 MongoDB URI:', MONGODB_URI ? 'Set' : 'Not set');
 });
