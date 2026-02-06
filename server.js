@@ -8,18 +8,20 @@ require('dotenv').config();
 const app = express();
 
 // ========== ENVIRONMENT VARIABLES ==========
-// Clean connection string without appName parameter
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
+// Try multiple connection string formats
+const MONGODB_URI = process.env.MONGODB_URI || 
+  'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority&socketTimeoutMS=60000&connectTimeoutMS=60000';
+
 const JWT_SECRET = process.env.JWT_SECRET || 'shamsi_institute_secret_key_2024_production';
 const PORT = process.env.PORT || 5000;
 
 // Debug log
-console.log('🔧 Configuration loaded:');
-console.log('- MONGODB_URI:', MONGODB_URI ? 'Set (masked)' : 'Not set');
-console.log('- JWT_SECRET:', JWT_SECRET ? 'Set' : 'Not set');
+console.log('🔧 Server starting...');
 console.log('- PORT:', PORT);
+console.log('- NODE_ENV:', process.env.NODE_ENV || 'development');
+console.log('- MONGODB_URI set:', !!process.env.MONGODB_URI);
 
-// ========== IMPROVED CORS CONFIGURATION ==========
+// ========== CORS CONFIGURATION ==========
 const corsOptions = {
   origin: [
     'https://quiz2-iota-one.vercel.app',
@@ -51,17 +53,16 @@ app.use((req, res, next) => {
   next();
 });
 
-// ========== IMPROVED MONGODB CONNECTION ==========
-console.log('🔗 Initializing MongoDB connection...');
+// ========== SIMPLIFIED MONGODB CONNECTION ==========
+console.log('\n🔗 Attempting MongoDB connection...');
 
-// Mongoose connection with better options
+// Simplified mongoose options
 const mongooseOptions = {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 30000, // 30 seconds
-  socketTimeoutMS: 45000, // 45 seconds
-  connectTimeoutMS: 30000,
-  maxPoolSize: 5,
+  serverSelectionTimeoutMS: 10000, // 10 seconds
+  socketTimeoutMS: 45000,
+  maxPoolSize: 2,
   minPoolSize: 1,
   retryWrites: true,
   w: 'majority'
@@ -69,50 +70,38 @@ const mongooseOptions = {
 
 // Track connection state
 let isDbConnected = false;
-let connectionRetries = 0;
-const maxRetries = 3;
+let dbConnectionAttempts = 0;
 
-const connectDB = async () => {
+// Connect to MongoDB with timeout
+const connectToMongoDB = async () => {
   try {
-    console.log(`🔄 Attempting MongoDB connection (Attempt ${connectionRetries + 1}/${maxRetries})...`);
+    dbConnectionAttempts++;
+    console.log(`🔄 Connection attempt ${dbConnectionAttempts}...`);
     
-    if (!MONGODB_URI) {
-      throw new Error('MONGODB_URI is not defined');
-    }
-
-    // Hide password in logs for security
+    // Mask URI for logging
     const maskedUri = MONGODB_URI.replace(/\/\/[^@]+@/, '//****:****@');
-    console.log(`🔗 Connecting to: ${maskedUri}`);
+    console.log(`📡 Connecting to: ${maskedUri}`);
     
     await mongoose.connect(MONGODB_URI, mongooseOptions);
     
     isDbConnected = true;
-    connectionRetries = 0;
-    
     console.log('✅ MongoDB Connected Successfully!');
     console.log(`📊 Database: ${mongoose.connection.name}`);
-    console.log(`📈 Host: ${mongoose.connection.host}`);
-    console.log(`🚪 Port: ${mongoose.connection.port}`);
+    console.log(`📍 Host: ${mongoose.connection.host}`);
     
-    // Verify connection with a ping
-    await mongoose.connection.db.admin().ping();
-    console.log('✅ MongoDB ping successful');
-    
-    return mongoose.connection;
-    
+    return true;
   } catch (error) {
-    connectionRetries++;
-    console.error(`❌ MongoDB Connection Failed (Attempt ${connectionRetries}):`, error.message);
+    console.error('❌ MongoDB Connection Error:', error.message);
+    console.error('❌ Error details:', error);
     
-    if (connectionRetries >= maxRetries) {
-      console.error('❌ Max connection retries reached. Server will run without database.');
-      return null;
+    if (dbConnectionAttempts < 2) {
+      console.log('🔄 Retrying connection in 3 seconds...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      return connectToMongoDB();
+    } else {
+      console.log('⚠️ Max connection attempts reached. Running without database.');
+      return false;
     }
-    
-    // Wait 5 seconds before retrying
-    console.log(`🔄 Retrying in 5 seconds... (${connectionRetries}/${maxRetries})`);
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    return connectDB();
   }
 };
 
@@ -132,19 +121,10 @@ mongoose.connection.on('disconnected', () => {
   isDbConnected = false;
 });
 
-mongoose.connection.on('reconnected', () => {
-  console.log('🔁 Mongoose reconnected to MongoDB');
-  isDbConnected = true;
-});
-
-// Initialize database connection
-let dbConnection;
-(async () => {
-  dbConnection = await connectDB();
-  if (dbConnection) {
-    await initializeDatabase();
-  }
-})();
+// Start connection
+setTimeout(async () => {
+  await connectToMongoDB();
+}, 1000);
 
 // ========== DATABASE SCHEMAS ==========
 const userSchema = new mongoose.Schema({
@@ -247,15 +227,18 @@ async function initializeDatabase() {
       console.log('✅ Config already exists');
     }
 
-    // Check existing questions
-    const questionCount = await Question.countDocuments();
-    console.log(`📊 Total questions in database: ${questionCount}`);
-
     console.log('✅ Database initialization complete');
   } catch (error) {
     console.error('❌ Error initializing database:', error.message);
   }
 }
+
+// Initialize after connection
+setTimeout(async () => {
+  if (isDbConnected) {
+    await initializeDatabase();
+  }
+}, 5000);
 
 // ========== MIDDLEWARES ==========
 const verifyToken = (req, res, next) => {
@@ -303,6 +286,8 @@ app.get('/', (req, res) => {
     message: '🚀 Shamsi Institute Quiz System API',
     version: '2.1.0',
     database: isDbConnected ? 'Connected ✅' : 'Disconnected ❌',
+    mongooseState: mongoose.connection.readyState,
+    stateText: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState] || 'unknown',
     timestamp: new Date().toISOString(),
     cors: {
       enabled: true,
@@ -310,6 +295,8 @@ app.get('/', (req, res) => {
     },
     endpoints: {
       health: 'GET /api/health',
+      debug: 'GET /api/debug-env',
+      checkMongo: 'GET /api/check-mongo',
       register: 'POST /api/register',
       adminLogin: 'POST /admin/login',
       quizQuestions: 'GET /api/quiz/questions/:category',
@@ -327,6 +314,8 @@ app.get('/api/health', (req, res) => {
     success: true,
     message: '✅ Server is running',
     database: isDbConnected ? 'Connected' : 'Disconnected',
+    mongooseState: mongoose.connection.readyState,
+    stateText: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState] || 'unknown',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     nodeVersion: process.version,
@@ -335,12 +324,97 @@ app.get('/api/health', (req, res) => {
       allowed: true
     },
     environment: process.env.NODE_ENV || 'development',
-    mongooseState: mongoose.connection.readyState,
     isDbConnected: isDbConnected
   });
 });
 
-// Database status endpoint (safe version)
+// Debug endpoint for environment
+app.get('/api/debug-env', (req, res) => {
+  // Mask sensitive info
+  const maskedMongoUri = process.env.MONGODB_URI ? 
+    'mongodb+srv://****:****@' + process.env.MONGODB_URI.split('@')[1] : 
+    'Not set';
+  
+  res.json({
+    success: true,
+    env: {
+      NODE_ENV: process.env.NODE_ENV,
+      MONGODB_URI_SET: !!process.env.MONGODB_URI,
+      MONGODB_URI_MASKED: maskedMongoUri,
+      JWT_SECRET_SET: !!process.env.JWT_SECRET,
+      ADMIN_PASSWORD_SET: !!process.env.ADMIN_PASSWORD,
+      PORT: process.env.PORT,
+      // Show all env vars (non-sensitive)
+      allVars: Object.keys(process.env).filter(key => 
+        !key.toLowerCase().includes('secret') && 
+        !key.toLowerCase().includes('password') &&
+        !key.toLowerCase().includes('key') &&
+        !key.toLowerCase().includes('token') &&
+        !key.toLowerCase().includes('uri')
+      ).sort()
+    },
+    mongoose: {
+      readyState: mongoose.connection.readyState,
+      state: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState] || 'unknown',
+      isConnected: isDbConnected,
+      host: mongoose.connection.host,
+      port: mongoose.connection.port,
+      name: mongoose.connection.name
+    },
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Check MongoDB connection
+app.get('/api/check-mongo', async (req, res) => {
+  try {
+    const state = mongoose.connection.readyState;
+    const stateText = ['disconnected', 'connected', 'connecting', 'disconnecting'][state] || 'unknown';
+    
+    if (state === 1) {
+      // Try to ping MongoDB
+      await mongoose.connection.db.admin().command({ ping: 1 });
+      
+      return res.json({
+        success: true,
+        message: '✅ MongoDB is connected and responding!',
+        state: state,
+        stateText: stateText,
+        host: mongoose.connection.host,
+        database: mongoose.connection.name,
+        collections: await mongoose.connection.db.listCollections().toArray().then(cols => cols.map(c => c.name)).catch(() => [])
+      });
+    } else if (state === 2) {
+      // Still connecting
+      return res.json({
+        success: false,
+        message: '⏳ MongoDB is still connecting...',
+        state: state,
+        stateText: stateText,
+        suggestion: 'Connection timeout may be occurring. Try increasing timeout values.'
+      });
+    } else {
+      // Disconnected or error
+      return res.json({
+        success: false,
+        message: '❌ MongoDB is not connected',
+        state: state,
+        stateText: stateText,
+        suggestion: 'Check MongoDB Atlas settings and connection string.'
+      });
+    }
+  } catch (error) {
+    res.json({
+      success: false,
+      message: 'Error checking MongoDB',
+      error: error.message,
+      state: mongoose.connection.readyState,
+      mongooseState: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState] || 'unknown'
+    });
+  }
+});
+
+// Database status endpoint
 app.get('/api/db-status', async (req, res) => {
   try {
     const state = mongoose.connection.readyState;
@@ -354,7 +428,7 @@ app.get('/api/db-status', async (req, res) => {
           state: state,
           stateText: stateText,
           message: 'Database is not connected',
-          retries: connectionRetries
+          attempts: dbConnectionAttempts
         },
         environment: {
           mongodb_uri_set: !!process.env.MONGODB_URI,
@@ -408,75 +482,19 @@ app.get('/api/db-status', async (req, res) => {
   }
 });
 
-// Debug endpoint for environment variables
-app.get('/api/debug-env', (req, res) => {
-  // Mask sensitive info
-  const maskedMongoUri = process.env.MONGODB_URI ? 
-    'mongodb+srv://****:****@' + process.env.MONGODB_URI.split('@')[1] : 
-    'Not set';
-  
-  res.json({
-    success: true,
-    env: {
-      NODE_ENV: process.env.NODE_ENV,
-      MONGODB_URI_SET: !!process.env.MONGODB_URI,
-      MONGODB_URI_MASKED: maskedMongoUri,
-      JWT_SECRET_SET: !!process.env.JWT_SECRET,
-      ADMIN_PASSWORD_SET: !!process.env.ADMIN_PASSWORD,
-      PORT: process.env.PORT,
-      // Show all env vars (non-sensitive)
-      allVars: Object.keys(process.env).filter(key => 
-        !key.toLowerCase().includes('secret') && 
-        !key.toLowerCase().includes('password') &&
-        !key.toLowerCase().includes('key') &&
-        !key.toLowerCase().includes('token') &&
-        !key.toLowerCase().includes('uri')
-      ).sort()
-    },
-    mongoose: {
-      readyState: mongoose.connection.readyState,
-      state: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState] || 'unknown',
-      isConnected: isDbConnected,
-      host: mongoose.connection.host,
-      port: mongoose.connection.port,
-      name: mongoose.connection.name
-    },
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Test MongoDB connection directly
-app.get('/api/test-mongo', async (req, res) => {
-  try {
-    // Force a simple query
-    await mongoose.connection.db.admin().command({ ping: 1 });
-    
-    res.json({
-      success: true,
-      message: 'MongoDB is connected!',
-      state: mongoose.connection.readyState,
-      host: mongoose.connection.host,
-      db: mongoose.connection.name,
-      collections: await mongoose.connection.db.listCollections().toArray().then(cols => cols.map(c => c.name))
-    });
-  } catch (error) {
-    res.json({
-      success: false,
-      message: 'MongoDB connection failed',
-      error: error.message,
-      state: mongoose.connection.readyState,
-      isDbConnected: isDbConnected,
-      connectionString: MONGODB_URI ? 'Set (masked)' : 'Not set'
-    });
-  }
-});
-
 // Admin Login
 app.post('/admin/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     
     console.log('🔐 Admin login attempt for:', username);
+    
+    if (!isDbConnected) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database is not connected. Please try again later.'
+      });
+    }
     
     // Check in database
     const admin = await Admin.findOne({ username });
@@ -1002,7 +1020,7 @@ app.use((req, res) => {
       '/',
       '/api/health',
       '/api/debug-env',
-      '/api/test-mongo',
+      '/api/check-mongo',
       '/api/register',
       '/admin/login',
       '/api/quiz/questions/:category',
@@ -1064,7 +1082,7 @@ app.listen(PORT, () => {
   console.log('   GET  /                    - API Info');
   console.log('   GET  /api/health          - Health Check');
   console.log('   GET  /api/debug-env       - Debug Environment');
-  console.log('   GET  /api/test-mongo      - Test MongoDB');
+  console.log('   GET  /api/check-mongo     - Check MongoDB');
   console.log('   POST /api/register        - Student Registration');
   console.log('   POST /admin/login         - Admin Login');
   console.log('   GET  /api/quiz/questions/:category - Get Questions');
