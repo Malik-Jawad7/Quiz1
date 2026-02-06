@@ -3,47 +3,56 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-require('dotenv').config();
 
 const app = express();
 
 // ==================== CONFIGURATION ====================
 const PORT = process.env.PORT || 5000;
 
-// UPDATED MONGODB CONNECTION STRING WITH APP NAME
-const MONGODB_URI = process.env.MONGODB_URI || 
-  'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority&appName=Cluster0';
-
+// Use environment variables
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
 const JWT_SECRET = process.env.JWT_SECRET || 'shamsi_institute_secret_key_2024';
 
 // ==================== CORS CONFIGURATION ====================
-const corsOptions = {
-  origin: '*', // Allow all origins
+app.use(cors({
+  origin: '*',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
-};
-
-app.use(cors(corsOptions));
+}));
 app.use(express.json());
 
 // ==================== MONGODB CONNECTION ====================
 console.log('🔗 Attempting MongoDB Connection...');
-console.log('📡 Connection String:', MONGODB_URI.replace(/\/\/[^@]+@/, '//***:***@'));
 
 // Improved MongoDB connection with better error handling
 const connectDB = async () => {
   try {
+    // Clear any existing connections first
+    if (mongoose.connection.readyState === 1) {
+      console.log('✅ Already connected to MongoDB');
+      return;
+    }
+
+    // Close any existing connection
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect();
+    }
+
+    console.log('📡 Connecting with URI:', MONGODB_URI.replace(/\/\/[^@]+@/, '//***:***@'));
+    
     await mongoose.connect(MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 10000, // Increased timeout
+      serverSelectionTimeoutMS: 30000, // Increased timeout to 30 seconds
       socketTimeoutMS: 45000,
       maxPoolSize: 10,
+      retryWrites: true,
+      w: 'majority'
     });
     
     console.log('✅ MongoDB Connected Successfully!');
-    console.log('📊 Database Name:', mongoose.connection.db.databaseName);
+    console.log('📊 Database Name:', mongoose.connection.db?.databaseName || 'Unknown');
     console.log('📈 Connection State:', getConnectionState());
     
     // Setup connection events
@@ -52,10 +61,10 @@ const connectDB = async () => {
     });
     
     mongoose.connection.on('disconnected', () => {
-      console.log('⚠️ MongoDB Disconnected. Attempting to reconnect...');
+      console.log('⚠️ MongoDB Disconnected');
     });
     
-    mongoose.connection.on('connected', () => {
+    mongoose.connection.on('reconnected', () => {
       console.log('✅ MongoDB Reconnected');
     });
     
@@ -64,18 +73,31 @@ const connectDB = async () => {
     
   } catch (error) {
     console.error('❌ MongoDB Connection Failed:', error.message);
-    console.error('💡 Error Details:', error);
-    console.log('🔄 Retrying connection in 5 seconds...');
+    console.error('💡 Error Details:', {
+      name: error.name,
+      code: error.code,
+      message: error.message
+    });
     
-    // Retry connection after 5 seconds
-    setTimeout(connectDB, 5000);
+    // If it's an authentication error, check credentials
+    if (error.message.includes('bad auth') || error.message.includes('Authentication failed')) {
+      console.error('🔑 Authentication Error: Please check MongoDB username/password');
+    }
+    
+    // If it's a network error
+    if (error.name === 'MongoNetworkError') {
+      console.error('🌐 Network Error: Check your internet connection and MongoDB Atlas network access');
+    }
+    
+    console.log('🔄 Retrying connection in 10 seconds...');
+    setTimeout(connectDB, 10000);
   }
 };
 
 // Helper function to get connection state
 const getConnectionState = () => {
   const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
-  return states[mongoose.connection.readyState];
+  return states[mongoose.connection.readyState] || 'unknown';
 };
 
 // Start the connection
@@ -146,6 +168,12 @@ async function initializeDatabase() {
   try {
     console.log('🔄 Initializing database...');
     
+    // Check database connection
+    if (mongoose.connection.readyState !== 1) {
+      console.log('⚠️ Database not connected, skipping initialization');
+      return;
+    }
+    
     // Check if admin exists
     const adminExists = await Admin.findOne({ username: 'admin' });
     if (!adminExists) {
@@ -180,10 +208,12 @@ async function initializeDatabase() {
     const questionCount = await Question.countDocuments();
     const userCount = await User.countDocuments();
     const adminCount = await Admin.countDocuments();
+    const registrationCount = await Registration.countDocuments();
     
     console.log('📊 Database Statistics:');
     console.log(`   Questions: ${questionCount}`);
     console.log(`   Users: ${userCount}`);
+    console.log(`   Registrations: ${registrationCount}`);
     console.log(`   Admins: ${adminCount}`);
     
     console.log('✅ Database initialization complete');
@@ -210,11 +240,23 @@ const verifyToken = (req, res, next) => {
     req.user = verified;
     next();
   } catch (error) {
-    res.status(400).json({
+    res.status(401).json({
       success: false,
       message: 'Invalid token'
     });
   }
+};
+
+// Database status middleware
+const checkDBConnection = (req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database not connected. Please try again later.',
+      databaseStatus: getConnectionState()
+    });
+  }
+  next();
 };
 
 // ==================== ROUTES ====================
@@ -240,7 +282,8 @@ app.get('/', (req, res) => {
       submitQuiz: 'POST /api/quiz/submit',
       config: 'GET /api/config',
       categories: 'GET /api/categories',
-      adminDashboard: 'GET /api/admin/dashboard (protected)'
+      adminDashboard: 'GET /api/admin/dashboard (protected)',
+      resetAdmin: 'POST /admin/reset'
     }
   });
 });
@@ -256,6 +299,7 @@ app.get('/api/db-status', async (req, res) => {
       stats = {
         questions: await Question.countDocuments(),
         users: await User.countDocuments(),
+        registrations: await Registration.countDocuments(),
         admins: await Admin.countDocuments(),
         configs: await Config.countDocuments()
       };
@@ -268,11 +312,16 @@ app.get('/api/db-status', async (req, res) => {
         connected: isConnected,
         connectionString: MONGODB_URI.replace(/\/\/[^@]+@/, '//***:***@'),
         stats: stats
+      },
+      server: {
+        uptime: process.uptime(),
+        memoryUsage: process.memoryUsage(),
+        nodeVersion: process.version
       }
     });
     
   } catch (error) {
-    res.json({
+    res.status(500).json({
       success: false,
       database: {
         status: getConnectionState(),
@@ -295,7 +344,8 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     nodeVersion: process.version,
-    memoryUsage: process.memoryUsage()
+    memoryUsage: process.memoryUsage(),
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
@@ -313,77 +363,64 @@ app.post('/admin/login', async (req, res) => {
     
     console.log('🔐 Admin login attempt for:', username);
     
-    // Check database connection first
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(500).json({
-        success: false,
-        message: 'Database not connected. Please try again later.'
-      });
-    }
-    
-    // Find admin
-    const admin = await Admin.findOne({ username });
-    
-    if (!admin) {
-      // Fallback: If no admin in DB, use default credentials
-      if (username === 'admin' && password === 'admin123') {
-        const token = jwt.sign(
-          { 
-            id: 'default-admin-id',
-            username: 'admin', 
-            role: 'superadmin'
-          },
-          JWT_SECRET,
-          { expiresIn: '24h' }
-        );
-        
-        return res.json({
-          success: true,
-          message: 'Login successful (default credentials)',
-          token,
-          user: {
-            username: 'admin',
-            role: 'superadmin'
-          }
-        });
-      }
+    // Always allow default admin credentials even if DB is not connected
+    if (username === 'admin' && password === 'admin123') {
+      const token = jwt.sign(
+        { 
+          id: 'default-admin-id',
+          username: 'admin', 
+          role: 'superadmin'
+        },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
       
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid credentials'
+      return res.json({
+        success: true,
+        message: 'Login successful (default credentials)',
+        token,
+        user: {
+          username: 'admin',
+          role: 'superadmin'
+        }
       });
     }
     
-    // Verify password
-    const validPassword = await bcrypt.compare(password, admin.password);
-    if (!validPassword) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid credentials'
-      });
-    }
-    
-    // Create token
-    const token = jwt.sign(
-      { 
-        id: admin._id, 
-        username: admin.username, 
-        role: admin.role
-      },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-    
-    console.log('✅ Admin login successful:', username);
-    
-    res.json({
-      success: true,
-      message: 'Login successful',
-      token,
-      user: {
-        username: admin.username,
-        role: admin.role
+    // If DB is connected, check in database
+    if (mongoose.connection.readyState === 1) {
+      const admin = await Admin.findOne({ username });
+      
+      if (admin) {
+        const validPassword = await bcrypt.compare(password, admin.password);
+        if (validPassword) {
+          const token = jwt.sign(
+            { 
+              id: admin._id, 
+              username: admin.username, 
+              role: admin.role
+            },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+          );
+          
+          console.log('✅ Admin login successful:', username);
+          
+          return res.json({
+            success: true,
+            message: 'Login successful',
+            token,
+            user: {
+              username: admin.username,
+              role: admin.role
+            }
+          });
+        }
       }
+    }
+    
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid credentials'
     });
     
   } catch (error) {
@@ -397,7 +434,7 @@ app.post('/admin/login', async (req, res) => {
 });
 
 // Register Student
-app.post('/api/register', async (req, res) => {
+app.post('/api/register', checkDBConnection, async (req, res) => {
   try {
     const { name, rollNumber, category } = req.body;
     
@@ -423,11 +460,18 @@ app.post('/api/register', async (req, res) => {
       });
     }
     
-    // Check database connection
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(500).json({
+    // Check if already registered
+    const existingRegistration = await Registration.findOne({ 
+      $or: [
+        { rollNumber: `SI-${rollNumber}` },
+        { name: new RegExp(`^${name}$`, 'i') }
+      ]
+    });
+    
+    if (existingRegistration) {
+      return res.status(400).json({
         success: false,
-        message: 'Database not connected. Please try again later.'
+        message: 'Student already registered'
       });
     }
     
@@ -464,28 +508,28 @@ app.post('/api/register', async (req, res) => {
 });
 
 // Get Quiz Questions
-app.get('/api/quiz/questions/:category', async (req, res) => {
+app.get('/api/quiz/questions/:category', checkDBConnection, async (req, res) => {
   try {
     const { category } = req.params;
     const lowercaseCategory = category.toLowerCase();
     
     console.log('📚 Fetching questions for category:', lowercaseCategory);
     
-    // Check database connection
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(500).json({
-        success: false,
-        message: 'Database not connected. Please try again later.'
-      });
-    }
-    
     // Get questions
     const questions = await Question.find({ category: lowercaseCategory });
     
     if (questions.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: `No questions found for ${category} category.`
+      // Return empty questions instead of error
+      return res.json({
+        success: true,
+        questions: [],
+        count: 0,
+        config: {
+          quizTime: 30,
+          passingPercentage: 40,
+          totalQuestions: 50
+        },
+        message: 'No questions available for this category. Please contact admin.'
       });
     }
     
@@ -533,7 +577,7 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
 });
 
 // Submit Quiz
-app.post('/api/quiz/submit', async (req, res) => {
+app.post('/api/quiz/submit', checkDBConnection, async (req, res) => {
   try {
     const { 
       rollNumber, 
@@ -555,14 +599,6 @@ app.post('/api/quiz/submit', async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Missing required fields'
-      });
-    }
-    
-    // Check database connection
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(500).json({
-        success: false,
-        message: 'Database not connected. Please try again later.'
       });
     }
     
@@ -629,27 +665,28 @@ app.post('/api/quiz/submit', async (req, res) => {
 app.get('/api/config', async (req, res) => {
   try {
     // Check database connection
-    if (mongoose.connection.readyState !== 1) {
+    if (mongoose.connection.readyState === 1) {
+      const config = await Config.findOne() || {
+        quizTime: 30,
+        passingPercentage: 40,
+        totalQuestions: 50
+      };
+      
       return res.json({
-        success: false,
-        config: {
-          quizTime: 30,
-          passingPercentage: 40,
-          totalQuestions: 50
-        },
-        message: 'Using default config (database not connected)'
+        success: true,
+        config
       });
     }
     
-    const config = await Config.findOne() || {
-      quizTime: 30,
-      passingPercentage: 40,
-      totalQuestions: 50
-    };
-    
+    // Return default config if DB not connected
     res.json({
       success: true,
-      config
+      config: {
+        quizTime: 30,
+        passingPercentage: 40,
+        totalQuestions: 50
+      },
+      message: 'Using default config (database not connected)'
     });
     
   } catch (error) {
@@ -670,36 +707,37 @@ app.get('/api/config', async (req, res) => {
 app.get('/api/categories', async (req, res) => {
   try {
     // Check database connection
-    if (mongoose.connection.readyState !== 1) {
+    if (mongoose.connection.readyState === 1) {
+      const dbCategories = await Question.distinct('category');
+      
+      const categories = await Promise.all(
+        dbCategories.map(async (category) => {
+          const count = await Question.countDocuments({ category });
+          return {
+            value: category,
+            label: category.charAt(0).toUpperCase() + category.slice(1),
+            questionCount: count
+          };
+        })
+      );
+      
       return res.json({
-        success: false,
-        categories: [
-          { value: 'html', label: 'HTML', questionCount: 0 },
-          { value: 'css', label: 'CSS', questionCount: 0 },
-          { value: 'javascript', label: 'JavaScript', questionCount: 0 },
-          { value: 'react', label: 'React.js', questionCount: 0 },
-          { value: 'node', label: 'Node.js', questionCount: 0 }
-        ],
-        message: 'Using default categories (database not connected)'
+        success: true,
+        categories
       });
     }
     
-    const dbCategories = await Question.distinct('category');
-    
-    const categories = await Promise.all(
-      dbCategories.map(async (category) => {
-        const count = await Question.countDocuments({ category });
-        return {
-          value: category,
-          label: category.charAt(0).toUpperCase() + category.slice(1),
-          questionCount: count
-        };
-      })
-    );
-    
+    // Return default categories if DB not connected
     res.json({
-      success: true,
-      categories
+      success: false,
+      categories: [
+        { value: 'html', label: 'HTML', questionCount: 0 },
+        { value: 'css', label: 'CSS', questionCount: 0 },
+        { value: 'javascript', label: 'JavaScript', questionCount: 0 },
+        { value: 'react', label: 'React.js', questionCount: 0 },
+        { value: 'node', label: 'Node.js', questionCount: 0 }
+      ],
+      message: 'Using default categories (database not connected)'
     });
     
   } catch (error) {
@@ -721,19 +759,12 @@ app.get('/api/categories', async (req, res) => {
 // ==================== ADMIN PROTECTED ROUTES ====================
 
 // Dashboard Stats
-app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
+app.get('/api/admin/dashboard', verifyToken, checkDBConnection, async (req, res) => {
   try {
-    // Check database connection
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(500).json({
-        success: false,
-        message: 'Database not connected'
-      });
-    }
-    
     const totalStudents = await User.countDocuments();
     const totalQuestions = await Question.countDocuments();
     const totalAttempts = await User.countDocuments();
+    const totalRegistrations = await Registration.countDocuments();
     
     let averageScore = 0;
     let passRate = 0;
@@ -753,6 +784,10 @@ app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
       submittedAt: { $gte: today } 
     });
     
+    const todayRegistrations = await Registration.countDocuments({ 
+      registeredAt: { $gte: today } 
+    });
+    
     const config = await Config.findOne() || { quizTime: 30, passingPercentage: 40 };
     
     res.json({
@@ -761,9 +796,11 @@ app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
         totalStudents,
         totalQuestions,
         totalAttempts,
-        averageScore,
-        passRate,
+        totalRegistrations,
+        averageScore: Math.round(averageScore * 100) / 100,
+        passRate: Math.round(passRate * 100) / 100,
         todayAttempts,
+        todayRegistrations,
         quizTime: config.quizTime,
         passingPercentage: config.passingPercentage
       }
@@ -780,7 +817,7 @@ app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
 });
 
 // Get All Questions (Admin)
-app.get('/api/admin/questions', verifyToken, async (req, res) => {
+app.get('/api/admin/questions', verifyToken, checkDBConnection, async (req, res) => {
   try {
     const { category = 'all', search = '', page = 1, limit = 100 } = req.query;
     
@@ -809,7 +846,8 @@ app.get('/api/admin/questions', verifyToken, async (req, res) => {
       questions,
       count: questions.length,
       total,
-      page: parseInt(page)
+      page: parseInt(page),
+      totalPages: Math.ceil(total / limit)
     });
     
   } catch (error) {
@@ -823,7 +861,7 @@ app.get('/api/admin/questions', verifyToken, async (req, res) => {
 });
 
 // Add Question (Admin)
-app.post('/api/admin/questions', verifyToken, async (req, res) => {
+app.post('/api/admin/questions', verifyToken, checkDBConnection, async (req, res) => {
   try {
     const { category, questionText, options, marks, difficulty } = req.body;
     
@@ -878,7 +916,7 @@ app.post('/api/admin/questions', verifyToken, async (req, res) => {
 });
 
 // Delete Question (Admin)
-app.delete('/api/admin/questions/:id', verifyToken, async (req, res) => {
+app.delete('/api/admin/questions/:id', verifyToken, checkDBConnection, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -907,7 +945,7 @@ app.delete('/api/admin/questions/:id', verifyToken, async (req, res) => {
 });
 
 // Get Results (Admin)
-app.get('/api/admin/results', verifyToken, async (req, res) => {
+app.get('/api/admin/results', verifyToken, checkDBConnection, async (req, res) => {
   try {
     const results = await User.find()
       .sort({ submittedAt: -1 });
@@ -929,7 +967,7 @@ app.get('/api/admin/results', verifyToken, async (req, res) => {
 });
 
 // Delete Result (Admin)
-app.delete('/api/admin/results/:id', verifyToken, async (req, res) => {
+app.delete('/api/admin/results/:id', verifyToken, checkDBConnection, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -958,7 +996,7 @@ app.delete('/api/admin/results/:id', verifyToken, async (req, res) => {
 });
 
 // Delete All Results (Admin)
-app.delete('/api/admin/results', verifyToken, async (req, res) => {
+app.delete('/api/admin/results', verifyToken, checkDBConnection, async (req, res) => {
   try {
     await User.deleteMany({});
     
@@ -978,7 +1016,7 @@ app.delete('/api/admin/results', verifyToken, async (req, res) => {
 });
 
 // Update Config (Admin)
-app.put('/api/config', verifyToken, async (req, res) => {
+app.put('/api/config', verifyToken, checkDBConnection, async (req, res) => {
   try {
     const { quizTime, passingPercentage, totalQuestions } = req.body;
     
@@ -1017,26 +1055,57 @@ app.put('/api/config', verifyToken, async (req, res) => {
 // Reset Admin
 app.post('/admin/reset', async (req, res) => {
   try {
-    // Delete existing admin
-    await Admin.deleteMany({ username: 'admin' });
-    
-    // Create new admin
-    const hashedPassword = await bcrypt.hash('admin123', 10);
-    await Admin.create({
-      username: 'admin',
-      password: hashedPassword,
-      email: 'admin@shamsi.edu.pk',
-      role: 'superadmin'
-    });
+    // Only reset if DB is connected
+    if (mongoose.connection.readyState === 1) {
+      // Delete existing admin
+      await Admin.deleteMany({ username: 'admin' });
+      
+      // Create new admin
+      const hashedPassword = await bcrypt.hash('admin123', 10);
+      await Admin.create({
+        username: 'admin',
+        password: hashedPassword,
+        email: 'admin@shamsi.edu.pk',
+        role: 'superadmin'
+      });
+      
+      return res.json({
+        success: true,
+        message: 'Admin reset successfully. Use username: admin, password: admin123'
+      });
+    }
     
     res.json({
-      success: true,
-      message: 'Admin reset successfully. Use username: admin, password: admin123'
+      success: false,
+      message: 'Database not connected. Cannot reset admin.'
     });
+    
   } catch (error) {
     console.error('Reset error:', error);
     res.status(500).json({
       success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get Registrations (Admin)
+app.get('/api/admin/registrations', verifyToken, checkDBConnection, async (req, res) => {
+  try {
+    const registrations = await Registration.find()
+      .sort({ registeredAt: -1 });
+    
+    res.json({
+      success: true,
+      registrations,
+      count: registrations.length
+    });
+    
+  } catch (error) {
+    console.error('Get registrations error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching registrations',
       error: error.message
     });
   }
@@ -1057,7 +1126,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({
     success: false,
     message: 'Internal server error',
-    error: err.message
+    error: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
   });
 });
 
@@ -1067,4 +1136,5 @@ app.listen(PORT, () => {
   console.log(`🌐 URL: http://localhost:${PORT}`);
   console.log('✅ CORS enabled for all origins');
   console.log('📡 MongoDB Status:', getConnectionState());
+  console.log('⚙️  Environment:', process.env.NODE_ENV || 'development');
 });
