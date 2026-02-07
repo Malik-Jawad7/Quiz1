@@ -10,56 +10,42 @@ const app = express();
 // ==================== CONFIGURATION ====================
 const JWT_SECRET = process.env.JWT_SECRET || 'shamsi_secret_key_2024_vercel_deploy';
 
-// **EMERGENCY FIX: Multiple MongoDB URI options**
-const getMongoDBUri = () => {
-  const uris = [
-    process.env.MONGODB_URI,
-    'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/shamsi_quiz_system?retryWrites=true&w=majority&appName=Cluster0',
-    'mongodb+srv://shamsi_admin:Admin123456@cluster0.e6gmkpo.mongodb.net/shamsi_quiz_system?retryWrites=true&w=majority',
-    'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/?retryWrites=true&w=majority',
-    'mongodb://khalid:khalid123@cluster0.e6gmkpo.mongodb.net:27017/shamsi_quiz_system'
-  ];
-  
-  for (let uri of uris) {
-    if (uri && uri.trim() !== '') {
-      console.log('📊 Found MongoDB URI');
-      return uri;
-    }
-  }
-  
-  return null;
-};
-
-const MONGODB_URI = getMongoDBUri();
+// **VERCEL OPTIMIZED MONGODB CONNECTION**
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/shamsi_quiz_system?retryWrites=true&w=majority';
 const PORT = process.env.PORT || 5000;
 
 console.log('🚀 Shamsi Institute Quiz System Backend');
-console.log('📊 Environment:', process.env.NODE_ENV || 'production');
+console.log('🌍 Environment:', process.env.NODE_ENV || 'production');
 console.log('📊 MongoDB URI available:', !!MONGODB_URI);
 
-// ==================== CORS ====================
-app.use(cors({
-  origin: '*',
+// ==================== CORS CONFIGURATION ====================
+const corsOptions = {
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://shamsi-institute-quiz.vercel.app',
+    'https://*.vercel.app'
+  ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
   credentials: true,
-  exposedHeaders: ['Content-Length', 'Authorization'],
-  maxAge: 86400
-}));
+  optionsSuccessStatus: 200
+};
 
-app.options('*', cors());
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ==================== MONGODB CONNECTION WITH FALLBACK ====================
+// ==================== MONGODB CONNECTION FOR VERCEL ====================
 let isMongoDBConnected = false;
 let mongooseConnection = null;
 let connectionAttempts = 0;
 
-console.log('\n🔗 Initializing MongoDB Connection...');
+console.log('\n🔗 Initializing MongoDB Connection for Vercel...');
 
-// In-memory database as fallback
+// In-memory database as fallback for Vercel
 const memoryDB = {
   questions: [],
   results: [],
@@ -75,7 +61,6 @@ const memoryDB = {
 // Load sample questions
 const loadSampleQuestions = () => {
   memoryDB.questions = [
-    // HTML Questions
     {
       _id: 'html_1',
       category: 'html',
@@ -102,7 +87,6 @@ const loadSampleQuestions = () => {
       difficulty: 'easy',
       createdAt: new Date()
     },
-    // CSS Questions
     {
       _id: 'css_1',
       category: 'css',
@@ -116,7 +100,6 @@ const loadSampleQuestions = () => {
       difficulty: 'easy',
       createdAt: new Date()
     },
-    // JavaScript Questions
     {
       _id: 'js_1',
       category: 'javascript',
@@ -138,10 +121,9 @@ const loadSampleQuestions = () => {
 // Initialize sample data
 loadSampleQuestions();
 
-// MongoDB Connection function
+// **VERCEL SPECIFIC CONNECTION FUNCTION**
 const connectToMongoDB = async () => {
   if (isMongoDBConnected && mongooseConnection) {
-    console.log('📊 Using existing MongoDB connection');
     return true;
   }
 
@@ -152,76 +134,66 @@ const connectToMongoDB = async () => {
 
   try {
     connectionAttempts++;
-    console.log(`🔄 MongoDB Connection Attempt ${connectionAttempts}...`);
-    console.log(`📊 URI: ${MONGODB_URI.substring(0, 60)}...`);
+    console.log(`🔄 Vercel MongoDB Connection Attempt ${connectionAttempts}...`);
 
-    // **VERCEL OPTIMIZED CONNECTION OPTIONS**
+    // **Vercel Optimized Connection Options**
     const connectionOptions = {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 5000,  // 5 seconds timeout for Vercel
-      socketTimeoutMS: 30000,
-      connectTimeoutMS: 10000,
-      maxPoolSize: 5,
-      minPoolSize: 1,
+      serverSelectionTimeoutMS: 10000,  // 10 seconds for Vercel
+      socketTimeoutMS: 45000,           // 45 seconds
+      connectTimeoutMS: 10000,          // 10 seconds
+      maxPoolSize: 10,
+      minPoolSize: 2,
       retryWrites: true,
       w: 'majority',
       ssl: true,
       tls: true,
-      family: 4,  // Force IPv4
-      heartbeatFrequencyMS: 10000
+      family: 4,  // Force IPv4 for Vercel
+      heartbeatFrequencyMS: 10000,
+      serverApi: { version: '1', strict: false, deprecationErrors: true }
     };
 
     mongoose.set('strictQuery', false);
 
-    // Connect with timeout
-    const connectPromise = mongoose.connect(MONGODB_URI, connectionOptions);
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('MongoDB connection timeout')), 8000);
-    });
-
-    await Promise.race([connectPromise, timeoutPromise]);
+    // For Vercel, we need to handle connection differently
+    await mongoose.connect(MONGODB_URI, connectionOptions);
 
     isMongoDBConnected = true;
     mongooseConnection = mongoose.connection;
 
-    console.log('✅✅✅ MONGODB CONNECTED SUCCESSFULLY! ✅✅✅');
+    console.log('✅✅✅ MONGODB CONNECTED SUCCESSFULLY ON VERCEL! ✅✅✅');
     console.log('📊 Database:', mongoose.connection.db?.databaseName || 'Unknown');
     console.log('📊 Host:', mongoose.connection.host);
-    console.log('📊 Ready State:', mongoose.connection.readyState);
+    console.log('📊 Ready State:', mongooseConnection.readyState);
 
     // Set up event listeners
-    mongoose.connection.on('connected', () => {
+    mongooseConnection.on('connected', () => {
       console.log('✅ MongoDB connected event');
       isMongoDBConnected = true;
     });
 
-    mongoose.connection.on('error', (err) => {
+    mongooseConnection.on('error', (err) => {
       console.error('❌ MongoDB error:', err.message);
       isMongoDBConnected = false;
     });
 
-    mongoose.connection.on('disconnected', () => {
+    mongooseConnection.on('disconnected', () => {
       console.log('⚠️ MongoDB disconnected');
       isMongoDBConnected = false;
-      // Auto-reconnect after 10 seconds
-      setTimeout(connectToMongoDB, 10000);
     });
 
-    // Initialize default data in MongoDB
+    // Initialize data
     await initializeMongoDBData();
     
     return true;
 
   } catch (error) {
-    console.error('❌ MongoDB connection failed:', error.message);
-    console.log('⚠️ Running in memory mode');
+    console.error('❌ MongoDB connection failed on Vercel:', error.message);
+    console.log('⚠️ Running in memory mode for Vercel');
     
     isMongoDBConnected = false;
     mongooseConnection = null;
-    
-    // Try to reconnect after 30 seconds
-    setTimeout(connectToMongoDB, 30000);
     
     return false;
   }
@@ -232,7 +204,7 @@ const initializeMongoDBData = async () => {
   if (!isMongoDBConnected) return;
 
   try {
-    console.log('📦 Initializing MongoDB data...');
+    console.log('📦 Initializing MongoDB data for Vercel...');
 
     // Define schemas
     const questionSchema = new mongoose.Schema({
@@ -291,7 +263,7 @@ const initializeMongoDBData = async () => {
         password: hashedPassword,
         createdAt: new Date()
       });
-      console.log('✅ Default admin created in MongoDB');
+      console.log('✅ Default admin created in MongoDB for Vercel');
     }
 
     // Create default config if not exists
@@ -303,25 +275,28 @@ const initializeMongoDBData = async () => {
         totalQuestions: 50,
         updatedAt: new Date()
       });
-      console.log('✅ Default config created in MongoDB');
+      console.log('✅ Default config created in MongoDB for Vercel');
     }
 
     // Check if questions exist, if not add samples
     const questionCount = await Question.countDocuments();
     if (questionCount === 0) {
       await Question.insertMany(memoryDB.questions);
-      console.log(`✅ ${memoryDB.questions.length} sample questions added to MongoDB`);
+      console.log(`✅ ${memoryDB.questions.length} sample questions added to MongoDB for Vercel`);
     }
 
-    console.log('✅ MongoDB data initialization complete');
+    console.log('✅ MongoDB data initialization complete for Vercel');
 
   } catch (error) {
-    console.error('❌ Error initializing MongoDB data:', error.message);
+    console.error('❌ Error initializing MongoDB data on Vercel:', error.message);
   }
 };
 
-// Start MongoDB connection
-connectToMongoDB();
+// Connect to MongoDB on server start
+connectToMongoDB().catch(err => {
+  console.error('Failed to connect to MongoDB:', err);
+  console.log('Running in memory mode for Vercel');
+});
 
 // ==================== HELPER FUNCTIONS ====================
 const getQuestionModel = () => {
@@ -361,8 +336,8 @@ app.get('/', (req, res) => {
   
   res.json({
     success: true,
-    message: '🎓 Shamsi Institute Quiz System API',
-    version: '21.0.0',
+    message: '🎓 Shamsi Institute Quiz System API (Vercel Optimized)',
+    version: '1.0.0',
     status: 'operational',
     database: {
       connected: isMongoDBConnected,
@@ -374,6 +349,7 @@ app.get('/', (req, res) => {
     environment: process.env.NODE_ENV || 'production',
     timestamp: new Date().toISOString(),
     admin_login: 'admin / admin123',
+    vercel_status: 'optimized',
     endpoints: {
       health: 'GET /api/health',
       db_status: 'GET /api/db-status',
@@ -386,69 +362,100 @@ app.get('/', (req, res) => {
       admin_dashboard: 'GET /api/admin/dashboard',
       admin_questions: 'GET /api/admin/questions',
       admin_results: 'GET /api/admin/results'
-    },
-    note: '✅ System works with both MongoDB and in-memory storage'
+    }
   });
 });
 
-// Health check
-app.get('/api/health', (req, res) => {
-  const dbState = mongooseConnection ? mongooseConnection.readyState : 0;
-  
-  res.json({
-    success: true,
-    status: 'healthy',
-    server_time: new Date().toISOString(),
-    uptime: process.uptime(),
-    node_version: process.version,
-    environment: process.env.NODE_ENV || 'production',
-    database: {
-      status: isMongoDBConnected ? 'mongodb-connected' : 'in-memory',
-      ready_state: dbState,
-      mode: isMongoDBConnected ? 'mongodb' : 'in-memory',
-      questions: isMongoDBConnected ? 'mongodb' : memoryDB.questions.length + ' in memory'
-    },
-    cors: {
-      enabled: true,
-      origin: req.headers.origin || '*'
+// Health check with Vercel optimization
+app.get('/api/health', async (req, res) => {
+  try {
+    let dbStatus = 'disconnected';
+    let dbPing = false;
+    
+    if (isMongoDBConnected && mongooseConnection) {
+      try {
+        await mongooseConnection.db.admin().ping();
+        dbStatus = 'connected';
+        dbPing = true;
+      } catch (pingError) {
+        dbStatus = 'disconnected';
+        dbPing = false;
+      }
     }
-  });
+    
+    res.json({
+      success: true,
+      status: 'healthy',
+      server_time: new Date().toISOString(),
+      uptime: process.uptime(),
+      node_version: process.version,
+      environment: process.env.NODE_ENV || 'production',
+      vercel_region: process.env.VERCEL_REGION || 'unknown',
+      database: {
+        status: dbStatus,
+        ping: dbPing,
+        mode: isMongoDBConnected ? 'mongodb' : 'in-memory',
+        questions: isMongoDBConnected ? 'mongodb' : memoryDB.questions.length + ' in memory'
+      },
+      memory: {
+        questions: memoryDB.questions.length,
+        results: memoryDB.results.length
+      }
+    });
+  } catch (error) {
+    res.json({
+      success: false,
+      status: 'error',
+      message: error.message
+    });
+  }
 });
 
 // Database status
 app.get('/api/db-status', async (req, res) => {
-  let dbInfo = {};
-  
-  if (isMongoDBConnected && mongooseConnection) {
-    try {
-      const collections = await mongooseConnection.db.listCollections().toArray();
-      dbInfo = {
-        database: mongooseConnection.db.databaseName,
-        host: mongooseConnection.host,
-        collections: collections.map(c => c.name),
-        collection_count: collections.length
-      };
-    } catch (err) {
-      dbInfo = { error: err.message };
+  try {
+    let dbInfo = {};
+    let collections = [];
+    
+    if (isMongoDBConnected && mongooseConnection) {
+      try {
+        collections = await mongooseConnection.db.listCollections().toArray();
+        dbInfo = {
+          database: mongooseConnection.db.databaseName,
+          host: mongooseConnection.host,
+          port: mongooseConnection.port,
+          collections: collections.map(c => c.name),
+          collection_count: collections.length
+        };
+      } catch (err) {
+        dbInfo = { error: err.message };
+      }
     }
+    
+    res.json({
+      success: true,
+      is_connected: isMongoDBConnected,
+      ready_state: mongooseConnection ? mongooseConnection.readyState : 0,
+      database_info: dbInfo,
+      memory_data: {
+        questions: memoryDB.questions.length,
+        results: memoryDB.results.length,
+        categories: [...new Set(memoryDB.questions.map(q => q.category))]
+      },
+      vercel_info: {
+        region: process.env.VERCEL_REGION,
+        url: process.env.VERCEL_URL
+      }
+    });
+  } catch (error) {
+    res.json({
+      success: false,
+      message: error.message
+    });
   }
-  
-  res.json({
-    success: true,
-    is_connected: isMongoDBConnected,
-    ready_state: mongooseConnection ? mongooseConnection.readyState : 0,
-    state_description: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongooseConnection ? mongooseConnection.readyState : 0],
-    database_info: dbInfo,
-    memory_data: {
-      questions: memoryDB.questions.length,
-      results: memoryDB.results.length,
-      categories: [...new Set(memoryDB.questions.map(q => q.category))]
-    },
-    connection_attempts: connectionAttempts
-  });
 });
 
-// Admin login - WORKS WITH BOTH MONGODB AND MEMORY
+// Admin login - Always works
 app.post('/admin/login', async (req, res) => {
   console.log('🔐 Admin login attempt');
   
@@ -487,28 +494,26 @@ app.post('/admin/login', async (req, res) => {
     // Try MongoDB authentication if connected
     if (isMongoDBConnected) {
       try {
-        const Admin = getAdminModel();
-        if (Admin) {
-          const admin = await Admin.findOne({ username: username.trim() });
-          if (admin) {
-            const isPasswordValid = await bcrypt.compare(password, admin.password);
-            if (isPasswordValid) {
-              const token = jwt.sign({ 
+        const Admin = mongoose.model('Admin');
+        const admin = await Admin.findOne({ username: username.trim() });
+        if (admin) {
+          const isPasswordValid = await bcrypt.compare(password, admin.password);
+          if (isPasswordValid) {
+            const token = jwt.sign({ 
+              username: admin.username,
+              role: 'admin',
+              source: 'mongodb'
+            }, JWT_SECRET, { expiresIn: '24h' });
+            
+            return res.json({
+              success: true,
+              message: '✅ Login successful (MongoDB)',
+              token,
+              user: {
                 username: admin.username,
-                role: 'admin',
-                source: 'mongodb'
-              }, JWT_SECRET, { expiresIn: '24h' });
-              
-              return res.json({
-                success: true,
-                message: '✅ Login successful (MongoDB)',
-                token,
-                user: {
-                  username: admin.username,
-                  role: 'admin'
-                }
-              });
-            }
+                role: 'admin'
+              }
+            });
           }
         }
       } catch (dbError) {
@@ -557,24 +562,22 @@ app.get('/api/config', async (req, res) => {
   try {
     if (isMongoDBConnected) {
       try {
-        const Config = getConfigModel();
-        if (Config) {
-          let config = await Config.findOne();
-          if (!config) {
-            config = await Config.create({
-              quizTime: 30,
-              passingPercentage: 40,
-              totalQuestions: 50,
-              updatedAt: new Date()
-            });
-          }
-          
-          return res.json({
-            success: true,
-            config,
-            source: 'mongodb'
+        const Config = mongoose.model('Config');
+        let config = await Config.findOne();
+        if (!config) {
+          config = await Config.create({
+            quizTime: 30,
+            passingPercentage: 40,
+            totalQuestions: 50,
+            updatedAt: new Date()
           });
         }
+        
+        return res.json({
+          success: true,
+          config,
+          source: 'mongodb'
+        });
       } catch (dbError) {
         console.log('⚠️ MongoDB config fetch failed:', dbError.message);
       }
@@ -620,32 +623,30 @@ app.put('/api/config', async (req, res) => {
     
     if (isMongoDBConnected) {
       try {
-        const Config = getConfigModel();
-        if (Config) {
-          let config = await Config.findOne();
-          
-          if (!config) {
-            config = await Config.create({
-              quizTime,
-              passingPercentage,
-              totalQuestions,
-              updatedAt: new Date()
-            });
-          } else {
-            config.quizTime = quizTime;
-            config.passingPercentage = passingPercentage;
-            config.totalQuestions = totalQuestions;
-            config.updatedAt = new Date();
-            await config.save();
-          }
-          
-          return res.json({
-            success: true,
-            message: '✅ Configuration updated in MongoDB',
-            config,
-            source: 'mongodb'
+        const Config = mongoose.model('Config');
+        let config = await Config.findOne();
+        
+        if (!config) {
+          config = await Config.create({
+            quizTime,
+            passingPercentage,
+            totalQuestions,
+            updatedAt: new Date()
           });
+        } else {
+          config.quizTime = quizTime;
+          config.passingPercentage = passingPercentage;
+          config.totalQuestions = totalQuestions;
+          config.updatedAt = new Date();
+          await config.save();
         }
+        
+        return res.json({
+          success: true,
+          message: '✅ Configuration updated in MongoDB',
+          config,
+          source: 'mongodb'
+        });
       } catch (dbError) {
         console.log('⚠️ MongoDB config update failed:', dbError.message);
       }
@@ -691,13 +692,11 @@ app.get('/api/categories', async (req, res) => {
     
     if (isMongoDBConnected) {
       try {
-        const Question = getQuestionModel();
-        if (Question) {
-          const dbCategories = await Question.distinct('category');
-          if (dbCategories && dbCategories.length > 0) {
-            categories = dbCategories;
-            source = 'mongodb';
-          }
+        const Question = mongoose.model('Question');
+        const dbCategories = await Question.distinct('category');
+        if (dbCategories && dbCategories.length > 0) {
+          categories = dbCategories;
+          source = 'mongodb';
         }
       } catch (dbError) {
         console.log('⚠️ MongoDB categories fetch failed:', dbError.message);
@@ -710,7 +709,11 @@ app.get('/api/categories', async (req, res) => {
       source = 'memory';
     }
     
-    const categoryData = categories.map(cat => ({
+    // Add more categories
+    const allCategories = ['html', 'css', 'javascript', 'react', 'node', 'python', 'java', 'mongodb'];
+    const uniqueCategories = [...new Set([...categories, ...allCategories])];
+    
+    const categoryData = uniqueCategories.map(cat => ({
       value: cat,
       label: cat.charAt(0).toUpperCase() + cat.slice(1),
       description: `${cat.charAt(0).toUpperCase() + cat.slice(1)} Technology`,
@@ -722,7 +725,7 @@ app.get('/api/categories', async (req, res) => {
       success: true,
       categories: categoryData,
       source: source,
-      count: categories.length
+      count: uniqueCategories.length
     });
     
   } catch (error) {
@@ -734,7 +737,9 @@ app.get('/api/categories', async (req, res) => {
       categories: [
         { value: 'html', label: 'HTML', description: 'HTML Web Development', available: true },
         { value: 'css', label: 'CSS', description: 'CSS Styling', available: true },
-        { value: 'javascript', label: 'JavaScript', description: 'JavaScript Programming', available: true }
+        { value: 'javascript', label: 'JavaScript', description: 'JavaScript Programming', available: true },
+        { value: 'react', label: 'React.js', description: 'React Framework', available: true },
+        { value: 'node', label: 'Node.js', description: 'Node.js Backend', available: true }
       ],
       source: 'fallback'
     });
@@ -803,27 +808,25 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
     
     if (isMongoDBConnected) {
       try {
-        const Question = getQuestionModel();
-        const Config = getConfigModel();
+        const Question = mongoose.model('Question');
+        const Config = mongoose.model('Config');
         
-        if (Question && Config) {
-          // Get config from MongoDB
-          const dbConfig = await Config.findOne();
-          if (dbConfig) {
-            config = dbConfig;
-          }
-          
-          // Get questions from MongoDB
-          const limit = config.totalQuestions || 10;
-          const dbQuestions = await Question.find({ 
-            category: formattedCategory 
-          }).limit(limit);
-          
-          if (dbQuestions.length > 0) {
-            questions = dbQuestions;
-            source = 'mongodb';
-            console.log(`✅ Found ${questions.length} questions in MongoDB`);
-          }
+        // Get config from MongoDB
+        const dbConfig = await Config.findOne();
+        if (dbConfig) {
+          config = dbConfig;
+        }
+        
+        // Get questions from MongoDB
+        const limit = config.totalQuestions || 10;
+        const dbQuestions = await Question.find({ 
+          category: formattedCategory 
+        }).limit(limit);
+        
+        if (dbQuestions.length > 0) {
+          questions = dbQuestions;
+          source = 'mongodb';
+          console.log(`✅ Found ${questions.length} questions in MongoDB`);
         }
       } catch (dbError) {
         console.log('⚠️ MongoDB questions fetch failed:', dbError.message);
@@ -918,12 +921,10 @@ app.post('/api/quiz/submit', async (req, res) => {
     // Save to MongoDB if connected
     if (isMongoDBConnected) {
       try {
-        const Result = getResultModel();
-        if (Result) {
-          const result = await Result.create(resultData);
-          console.log('✅ Result saved to MongoDB with ID:', result._id);
-          savedToDB = true;
-        }
+        const Result = mongoose.model('Result');
+        const result = await Result.create(resultData);
+        console.log('✅ Result saved to MongoDB with ID:', result._id);
+        savedToDB = true;
       } catch (dbError) {
         console.error('❌ MongoDB save error:', dbError.message);
       }
@@ -1047,42 +1048,40 @@ app.get('/api/admin/dashboard', authenticateAdmin, async (req, res) => {
     
     if (isMongoDBConnected) {
       try {
-        const Result = getResultModel();
-        const Question = getQuestionModel();
+        const Result = mongoose.model('Result');
+        const Question = mongoose.model('Question');
         
-        if (Result && Question) {
-          const totalStudents = await Result.countDocuments({});
-          const totalQuestions = await Question.countDocuments({});
-          const results = await Result.find({});
+        const totalStudents = await Result.countDocuments({});
+        const totalQuestions = await Question.countDocuments({});
+        const results = await Result.find({});
+        
+        let averageScore = 0;
+        let passRate = 0;
+        
+        if (results.length > 0) {
+          const totalPercentage = results.reduce((sum, r) => sum + (r.percentage || 0), 0);
+          averageScore = totalPercentage / results.length;
           
-          let averageScore = 0;
-          let passRate = 0;
-          
-          if (results.length > 0) {
-            const totalPercentage = results.reduce((sum, r) => sum + (r.percentage || 0), 0);
-            averageScore = totalPercentage / results.length;
-            
-            const passedCount = results.filter(r => r.passed).length;
-            passRate = (passedCount / results.length) * 100;
-          }
-          
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const todayAttempts = await Result.countDocuments({
-            submittedAt: { $gte: today }
-          });
-          
-          stats = {
-            totalStudents,
-            totalQuestions,
-            totalAttempts: totalStudents,
-            averageScore: parseFloat(averageScore.toFixed(2)),
-            passRate: parseFloat(passRate.toFixed(2)),
-            todayAttempts
-          };
-          
-          source = 'mongodb';
+          const passedCount = results.filter(r => r.passed).length;
+          passRate = (passedCount / results.length) * 100;
         }
+        
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayAttempts = await Result.countDocuments({
+          submittedAt: { $gte: today }
+        });
+        
+        stats = {
+          totalStudents,
+          totalQuestions,
+          totalAttempts: totalStudents,
+          averageScore: parseFloat(averageScore.toFixed(2)),
+          passRate: parseFloat(passRate.toFixed(2)),
+          todayAttempts
+        };
+        
+        source = 'mongodb';
       } catch (dbError) {
         console.log('⚠️ MongoDB dashboard fetch failed:', dbError.message);
       }
@@ -1145,31 +1144,29 @@ app.get('/api/admin/questions', authenticateAdmin, async (req, res) => {
     
     if (isMongoDBConnected) {
       try {
-        const Question = getQuestionModel();
-        if (Question) {
-          let query = {};
-          
-          if (category !== 'all') {
-            query.category = category.toLowerCase();
-          }
-          
-          if (search && search.trim() !== '') {
-            query.$or = [
-              { questionText: { $regex: search.trim(), $options: 'i' } },
-              { 'options.text': { $regex: search.trim(), $options: 'i' } }
-            ];
-          }
-          
-          const skip = (parseInt(page) - 1) * parseInt(limit);
-          
-          questions = await Question.find(query)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(parseInt(limit));
-          
-          total = await Question.countDocuments(query);
-          source = 'mongodb';
+        const Question = mongoose.model('Question');
+        let query = {};
+        
+        if (category !== 'all') {
+          query.category = category.toLowerCase();
         }
+        
+        if (search && search.trim() !== '') {
+          query.$or = [
+            { questionText: { $regex: search.trim(), $options: 'i' } },
+            { 'options.text': { $regex: search.trim(), $options: 'i' } }
+          ];
+        }
+        
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        
+        questions = await Question.find(query)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(parseInt(limit));
+        
+        total = await Question.countDocuments(query);
+        source = 'mongodb';
       } catch (dbError) {
         console.log('Questions fetch error:', dbError.message);
       }
@@ -1263,12 +1260,10 @@ app.post('/api/admin/questions', authenticateAdmin, async (req, res) => {
     // Save to MongoDB if connected
     if (isMongoDBConnected) {
       try {
-        const Question = getQuestionModel();
-        if (Question) {
-          savedQuestion = await Question.create(questionData);
-          source = 'mongodb';
-          console.log('✅ Question saved to MongoDB');
-        }
+        const Question = mongoose.model('Question');
+        savedQuestion = await Question.create(questionData);
+        source = 'mongodb';
+        console.log('✅ Question saved to MongoDB');
       } catch (dbError) {
         console.log('Question add error:', dbError.message);
       }
@@ -1310,13 +1305,11 @@ app.get('/api/admin/results', authenticateAdmin, async (req, res) => {
     
     if (isMongoDBConnected) {
       try {
-        const Result = getResultModel();
-        if (Result) {
-          results = await Result.find()
-            .sort({ submittedAt: -1 })
-            .limit(1000);
-          source = 'mongodb';
-        }
+        const Result = mongoose.model('Result');
+        results = await Result.find()
+          .sort({ submittedAt: -1 })
+          .limit(1000);
+        source = 'mongodb';
       } catch (dbError) {
         console.log('Results fetch error:', dbError.message);
       }
@@ -1346,15 +1339,176 @@ app.get('/api/admin/results', authenticateAdmin, async (req, res) => {
   }
 });
 
-// ==================== START SERVER ====================
-const server = app.listen(PORT, () => {
-  console.log(`\n🚀 Server running on port ${PORT}`);
-  console.log(`🌐 http://localhost:${PORT}`);
-  console.log(`🔐 Admin login: admin / admin123`);
-  console.log(`✅ MongoDB Status: ${isMongoDBConnected ? 'CONNECTED 🎉' : 'DISCONNECTED (Using Memory)'}`);
-  console.log(`📊 Memory Questions: ${memoryDB.questions.length}`);
-  console.log(`📊 Memory Results: ${memoryDB.results.length}`);
-  console.log(`\n💡 System works with both MongoDB and Memory storage!`);
+// Delete question
+app.delete('/api/admin/questions/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (isMongoDBConnected) {
+      try {
+        const Question = mongoose.model('Question');
+        await Question.findByIdAndDelete(id);
+      } catch (dbError) {
+        console.log('MongoDB delete error:', dbError.message);
+      }
+    }
+    
+    // Delete from memory
+    memoryDB.questions = memoryDB.questions.filter(q => q._id !== id);
+    
+    res.json({
+      success: true,
+      message: 'Question deleted successfully'
+    });
+    
+  } catch (error) {
+    console.error('Delete question error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
 });
 
+// Delete result
+app.delete('/api/admin/results/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (isMongoDBConnected) {
+      try {
+        const Result = mongoose.model('Result');
+        await Result.findByIdAndDelete(id);
+      } catch (dbError) {
+        console.log('MongoDB delete error:', dbError.message);
+      }
+    }
+    
+    // Delete from memory
+    memoryDB.results = memoryDB.results.filter(r => r._id !== id);
+    
+    res.json({
+      success: true,
+      message: 'Result deleted successfully'
+    });
+    
+  } catch (error) {
+    console.error('Delete result error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+
+// Delete all results
+app.delete('/api/admin/results', authenticateAdmin, async (req, res) => {
+  try {
+    if (isMongoDBConnected) {
+      try {
+        const Result = mongoose.model('Result');
+        await Result.deleteMany({});
+      } catch (dbError) {
+        console.log('MongoDB delete all error:', dbError.message);
+      }
+    }
+    
+    // Clear memory results
+    memoryDB.results = [];
+    
+    res.json({
+      success: true,
+      message: 'All results deleted successfully'
+    });
+    
+  } catch (error) {
+    console.error('Delete all results error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+
+// Test connection endpoint for Vercel
+app.get('/api/test-connection', async (req, res) => {
+  try {
+    if (isMongoDBConnected) {
+      await mongooseConnection.db.admin().ping();
+      res.json({
+        success: true,
+        message: '✅ MongoDB connected and responding',
+        database: mongooseConnection.db.databaseName,
+        host: mongooseConnection.host,
+        readyState: mongooseConnection.readyState
+      });
+    } else {
+      res.json({
+        success: false,
+        message: '❌ MongoDB not connected',
+        memory_mode: true,
+        memory_questions: memoryDB.questions.length,
+        memory_results: memoryDB.results.length
+      });
+    }
+  } catch (error) {
+    res.json({
+      success: false,
+      message: 'MongoDB test failed: ' + error.message,
+      memory_mode: true
+    });
+  }
+});
+
+// **VERCEL DEPLOYMENT ENDPOINT**
+app.get('/api/vercel-status', (req, res) => {
+  res.json({
+    success: true,
+    message: '✅ Backend deployed on Vercel successfully',
+    timestamp: new Date().toISOString(),
+    region: process.env.VERCEL_REGION || 'unknown',
+    git_commit: process.env.VERCEL_GIT_COMMIT_SHA || 'unknown',
+    environment: process.env.NODE_ENV || 'production',
+    mongodb: {
+      connected: isMongoDBConnected,
+      uri_present: !!MONGODB_URI,
+      memory_fallback: true
+    }
+  });
+});
+
+// 404 Handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Route not found',
+    path: req.path,
+    method: req.method
+  });
+});
+
+// Error Handler
+app.use((err, req, res, next) => {
+  console.error('Server error:', err);
+  res.status(500).json({
+    success: false,
+    message: 'Internal server error',
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+  });
+});
+
+// ==================== START SERVER FOR VERCEL ====================
+if (process.env.NODE_ENV !== 'production') {
+  const server = app.listen(PORT, () => {
+    console.log(`\n🚀 Server running on port ${PORT}`);
+    console.log(`🌐 http://localhost:${PORT}`);
+    console.log(`🔐 Admin login: admin / admin123`);
+    console.log(`✅ MongoDB Status: ${isMongoDBConnected ? 'CONNECTED 🎉' : 'DISCONNECTED (Using Memory)'}`);
+    console.log(`📊 Memory Questions: ${memoryDB.questions.length}`);
+    console.log(`📊 Memory Results: ${memoryDB.results.length}`);
+    console.log(`\n💡 System optimized for Vercel deployment!`);
+  });
+}
+
+// Export for Vercel
 module.exports = app;
