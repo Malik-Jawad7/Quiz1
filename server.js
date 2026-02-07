@@ -9,8 +9,8 @@ const app = express();
 // ==================== CONFIGURATION ====================
 const PORT = process.env.PORT || 5000;
 
-// Vercel pe environment variables ko handle karna
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
+// IMPORTANT: Yaha apna correct password likhein
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority&appName=Cluster0';
 const JWT_SECRET = process.env.JWT_SECRET || 'shamsi_institute_secret_key_2024';
 
 // ==================== CORS CONFIGURATION ====================
@@ -23,82 +23,114 @@ app.use(cors({
 
 app.use(express.json());
 
-// ==================== MONGODB CONNECTION (VERCEL COMPATIBLE) ====================
-console.log('🔗 Attempting MongoDB Connection...');
-console.log('📡 Connection String (masked):', MONGODB_URI ? MONGODB_URI.replace(/\/\/[^@]+@/, '//***:***@') : 'Not found');
+// ==================== MONGODB CONNECTION ====================
+console.log('🚀 Starting MongoDB Connection for Vercel...');
+console.log('📡 Using Connection String:', MONGODB_URI ? MONGODB_URI.replace(/\/\/[^@]+@/, '//***:***@') : 'Not found');
 console.log('🌍 Environment:', process.env.NODE_ENV || 'development');
 
-// Vercel serverless environment ke liye optimized connection
-mongoose.set('strictQuery', true);
+// Vercel ke liye optimized mongoose settings
+mongoose.set('strictQuery', false);
 mongoose.set('bufferCommands', false);
-mongoose.set('bufferTimeoutMS', 30000);
 
-// Vercel ke liye optimized connection options
-const mongooseOptions = {
-  serverSelectionTimeoutMS: 30000, // 30 seconds
-  socketTimeoutMS: 45000, // 45 seconds
-  family: 4, // Use IPv4, skip IPv6
-  maxPoolSize: 10,
-  minPoolSize: 2,
-  connectTimeoutMS: 30000,
-};
+// Connection retry function
+let isConnecting = false;
+let connectionRetries = 0;
+const MAX_RETRIES = 3;
 
-// Connection retry logic
-let connectionAttempts = 0;
-const MAX_RETRIES = 5;
-
-const connectWithRetry = async () => {
+const connectToDatabase = async () => {
   try {
-    connectionAttempts++;
-    console.log(`🔄 MongoDB Connection Attempt #${connectionAttempts}`);
+    // Agar already connecting hai to wait karein
+    if (isConnecting) {
+      console.log('⏳ Already connecting to database...');
+      return;
+    }
     
+    // Agar already connected hai
     if (mongoose.connection.readyState === 1) {
       console.log('✅ Already connected to MongoDB');
       return mongoose.connection;
     }
     
-    // Connection string mein Vercel ke liye specific parameters add karo
-    let connectionString = MONGODB_URI;
+    isConnecting = true;
+    connectionRetries++;
     
-    // Ensure proper format
-    if (!connectionString.includes('retryWrites')) {
+    console.log(`🔄 Connection attempt ${connectionRetries}/${MAX_RETRIES}`);
+    
+    // Clean connection string
+    let connectionString = MONGODB_URI.trim();
+    
+    // Ensure it has proper parameters for Vercel
+    if (!connectionString.includes('retryWrites=true')) {
       connectionString += connectionString.includes('?') ? '&' : '?';
       connectionString += 'retryWrites=true&w=majority';
     }
     
-    // Vercel/serverless environment ke liye additional options
+    // Add SSL for Vercel production
     if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
-      console.log('🚀 Running in Vercel/Production environment');
-      connectionString += '&ssl=true&tlsAllowInvalidCertificates=false';
+      if (!connectionString.includes('ssl=')) {
+        connectionString += '&ssl=true';
+      }
+      if (!connectionString.includes('tlsAllowInvalidCertificates')) {
+        connectionString += '&tlsAllowInvalidCertificates=false';
+      }
     }
     
-    console.log('📊 Final Connection String (masked):', 
+    console.log('🔗 Final Connection String (masked):', 
       connectionString.replace(/\/\/[^@]+@/, '//***:***@'));
     
-    await mongoose.connect(connectionString, mongooseOptions);
+    // Connection options for Vercel
+    const options = {
+      serverSelectionTimeoutMS: 30000,
+      socketTimeoutMS: 45000,
+      maxPoolSize: 5,
+      minPoolSize: 1,
+      connectTimeoutMS: 30000,
+      family: 4 // Use IPv4
+    };
+    
+    await mongoose.connect(connectionString, options);
     
     console.log('✅ MongoDB Connected Successfully!');
-    console.log('📊 Database:', mongoose.connection.db?.databaseName || 'quiz_system');
-    console.log('📈 Connection State:', getConnectionState());
-    console.log('👤 Connected as user:', 'khalid');
+    console.log('📊 Database Name:', mongoose.connection.db?.databaseName);
     console.log('📍 Host:', mongoose.connection.host);
+    console.log('📈 Connection State:', getConnectionState());
     
-    connectionAttempts = 0; // Reset counter on success
+    isConnecting = false;
+    connectionRetries = 0;
+    
+    // Connection event handlers
+    mongoose.connection.on('error', (err) => {
+      console.error('❌ MongoDB Connection Error:', err.message);
+    });
+    
+    mongoose.connection.on('disconnected', () => {
+      console.log('⚠️ MongoDB Disconnected');
+    });
+    
+    mongoose.connection.on('reconnected', () => {
+      console.log('✅ MongoDB Reconnected');
+    });
+    
+    // Initialize database
+    await initializeDatabase();
     
     return mongoose.connection;
     
   } catch (error) {
-    console.error(`❌ MongoDB Connection Failed (Attempt ${connectionAttempts}):`, error.message);
+    isConnecting = false;
     
-    if (connectionAttempts < MAX_RETRIES) {
-      console.log(`🔄 Retrying in 5 seconds... (${MAX_RETRIES - connectionAttempts} attempts left)`);
-      setTimeout(connectWithRetry, 5000);
+    console.error(`❌ Connection Failed (Attempt ${connectionRetries}):`, error.message);
+    console.error('💡 Error Type:', error.name);
+    
+    if (connectionRetries < MAX_RETRIES) {
+      console.log(`🔄 Retrying in 3 seconds... (${MAX_RETRIES - connectionRetries} attempts left)`);
+      setTimeout(connectToDatabase, 3000);
     } else {
-      console.error('💥 Max connection attempts reached. Please check:');
-      console.error('   1. MongoDB Atlas IP Whitelist (0.0.0.0/0)');
-      console.error('   2. Username/Password');
-      console.error('   3. Network Connectivity');
-      console.error('   4. Cluster Status');
+      console.error('💥 Max retries reached. Manual intervention required.');
+      console.error('📝 Please check:');
+      console.error('   1. MongoDB Atlas IP Whitelist: 0.0.0.0/0');
+      console.error('   2. Username/Password in connection string');
+      console.error('   3. Cluster status in MongoDB Atlas dashboard');
     }
     
     return null;
@@ -118,7 +150,7 @@ const getConnectionState = () => {
 };
 
 // Start connection
-connectWithRetry();
+connectToDatabase();
 
 // ==================== DATABASE SCHEMAS ====================
 const userSchema = new mongoose.Schema({
@@ -186,11 +218,11 @@ async function initializeDatabase() {
     console.log('🔄 Initializing database...');
     
     if (mongoose.connection.readyState !== 1) {
-      console.log('⚠️ Database not connected, skipping initialization');
+      console.log('⚠️ Database not connected');
       return;
     }
     
-    // Admin initialization
+    // Check and create admin
     const adminExists = await Admin.findOne({ username: 'admin' });
     if (!adminExists) {
       const hashedPassword = await bcrypt.hash('admin123', 10);
@@ -200,10 +232,10 @@ async function initializeDatabase() {
         email: 'admin@shamsi.edu.pk',
         role: 'superadmin'
       });
-      console.log('✅ Default admin created');
+      console.log('✅ Default admin created (username: admin, password: admin123)');
     }
     
-    // Config initialization
+    // Check and create config
     const configExists = await Config.findOne();
     if (!configExists) {
       await Config.create({
@@ -214,17 +246,16 @@ async function initializeDatabase() {
       console.log('✅ Default config created');
     }
     
-    console.log('📊 Database initialized successfully');
+    console.log('📊 Database initialization complete');
     
   } catch (error) {
-    console.error('❌ Database initialization error:', error.message);
+    console.error('❌ Database init error:', error.message);
   }
 }
 
 // ==================== MIDDLEWARE ====================
 const verifyToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const token = req.headers['authorization']?.split(' ')[1];
   
   if (!token) {
     return res.status(401).json({
@@ -234,8 +265,7 @@ const verifyToken = (req, res, next) => {
   }
 
   try {
-    const verified = jwt.verify(token, JWT_SECRET);
-    req.user = verified;
+    req.user = jwt.verify(token, JWT_SECRET);
     next();
   } catch (error) {
     res.status(401).json({
@@ -245,18 +275,14 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-const checkDBConnection = (req, res, next) => {
+// Database connection check middleware
+const checkDB = (req, res, next) => {
   if (mongoose.connection.readyState !== 1) {
     return res.status(503).json({
       success: false,
-      message: 'Database not connected. Please try again later.',
-      databaseStatus: getConnectionState(),
-      timestamp: new Date().toISOString(),
-      tips: [
-        'Check MongoDB Atlas IP Whitelist (should be 0.0.0.0/0)',
-        'Verify database user credentials',
-        'Check cluster status in MongoDB Atlas dashboard'
-      ]
+      message: 'Database not connected',
+      state: getConnectionState(),
+      timestamp: new Date().toISOString()
     });
   }
   next();
@@ -266,96 +292,133 @@ const checkDBConnection = (req, res, next) => {
 
 // Root endpoint
 app.get('/', (req, res) => {
-  const dbStatus = getConnectionState();
-  const isConnected = dbStatus === 'connected';
+  const dbState = getConnectionState();
+  const isConnected = mongoose.connection.readyState === 1;
   
   res.json({
     success: true,
     message: '🚀 Shamsi Institute Quiz System API',
-    version: '2.1.0',
-    database: isConnected ? 'Connected ✅' : `Disconnected ❌ (${dbStatus})`,
+    version: '2.2.0',
+    database: isConnected ? 'Connected ✅' : `Disconnected ❌ (${dbState})`,
     environment: process.env.NODE_ENV || 'development',
     vercel: !!process.env.VERCEL,
     timestamp: new Date().toISOString(),
     endpoints: {
-      health: '/api/health',
-      dbStatus: '/api/db-status',
-      register: 'POST /api/register',
+      health: 'GET /health',
+      dbStatus: 'GET /api/db-status',
+      testConnection: 'GET /api/test-connection',
       adminLogin: 'POST /admin/login',
-      quizQuestions: 'GET /api/quiz/questions/:category',
+      registerStudent: 'POST /api/register',
+      getQuestions: 'GET /api/quiz/questions/:category',
       submitQuiz: 'POST /api/quiz/submit'
     }
   });
 });
 
-// MongoDB Connection Test Endpoint
-app.get('/api/test-mongodb', async (req, res) => {
+// Health check
+app.get('/health', (req, res) => {
+  const dbState = getConnectionState();
+  
+  res.json({
+    success: true,
+    status: 'running',
+    database: dbState,
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    node: process.version,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Database status
+app.get('/api/db-status', async (req, res) => {
   try {
     const state = getConnectionState();
     const isConnected = mongoose.connection.readyState === 1;
     
+    let stats = {};
     if (isConnected) {
-      // Try a simple database operation
-      const adminCount = await Admin.countDocuments();
-      const questionCount = await Question.countDocuments();
-      
-      return res.json({
-        success: true,
-        message: '✅ MongoDB is connected and working!',
-        connectionState: state,
-        databaseStats: {
-          admins: adminCount,
-          questions: questionCount,
-          dbName: mongoose.connection.db?.databaseName
-        },
-        connectionDetails: {
-          host: mongoose.connection.host,
-          port: mongoose.connection.port,
-          user: 'khalid'
-        }
-      });
+      try {
+        // Try a simple query to verify connection
+        await mongoose.connection.db.admin().ping();
+        
+        stats = {
+          users: await User.countDocuments(),
+          questions: await Question.countDocuments(),
+          registrations: await Registration.countDocuments(),
+          admins: await Admin.countDocuments(),
+          config: await Config.findOne() || { quizTime: 30 }
+        };
+      } catch (dbError) {
+        console.error('Database query error:', dbError.message);
+      }
     }
     
-    // Try to reconnect
-    await connectWithRetry();
-    
     res.json({
-      success: false,
-      message: '❌ MongoDB is not connected',
-      connectionState: state,
-      reconnectionAttempted: true,
-      tips: [
-        'Check if MongoDB Atlas cluster is running',
-        'Verify IP whitelist includes 0.0.0.0/0',
-        'Check username/password in connection string'
-      ]
+      success: true,
+      connected: isConnected,
+      state: state,
+      stats: stats,
+      environment: process.env.NODE_ENV || 'development'
     });
     
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Error testing MongoDB connection',
-      error: error.message,
-      connectionString: MONGODB_URI ? MONGODB_URI.replace(/\/\/[^@]+@/, '//***:***@') : 'Not set'
+      message: 'Error checking database status',
+      error: error.message
     });
   }
 });
 
-// Health check
-app.get('/api/health', (req, res) => {
-  const dbStatus = getConnectionState();
-  const isConnected = dbStatus === 'connected';
-  
-  res.json({
-    success: true,
-    status: 'healthy',
-    database: isConnected ? 'connected' : `disconnected (${dbStatus})`,
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    platform: process.platform,
-    node: process.version
-  });
+// Test MongoDB Connection
+app.get('/api/test-connection', async (req, res) => {
+  try {
+    console.log('🧪 Testing MongoDB Connection...');
+    
+    // Try to connect if not connected
+    if (mongoose.connection.readyState !== 1) {
+      console.log('🔧 Attempting to reconnect...');
+      await connectToDatabase();
+    }
+    
+    const isConnected = mongoose.connection.readyState === 1;
+    
+    if (isConnected) {
+      // Test with actual database operation
+      const db = mongoose.connection.db;
+      const collections = await db.listCollections().toArray();
+      const adminCount = await Admin.countDocuments();
+      
+      res.json({
+        success: true,
+        message: '✅ MongoDB Connection Successful!',
+        details: {
+          host: mongoose.connection.host,
+          database: db.databaseName,
+          collections: collections.map(c => c.name),
+          adminCount: adminCount,
+          connectionState: getConnectionState()
+        }
+      });
+    } else {
+      res.json({
+        success: false,
+        message: '❌ MongoDB Connection Failed',
+        state: getConnectionState(),
+        connectionString: MONGODB_URI ? 'Set (masked)' : 'Not set',
+        suggestion: 'Check MongoDB Atlas IP whitelist and credentials'
+      });
+    }
+    
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Connection test failed',
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
 });
 
 // Admin Login
@@ -366,13 +429,13 @@ app.post('/admin/login', async (req, res) => {
     if (!username || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Username and password are required'
+        message: 'Username and password required'
       });
     }
     
-    console.log('🔐 Admin login attempt for:', username);
+    console.log(`🔐 Login attempt: ${username}`);
     
-    // First try default credentials
+    // First, try default credentials (works even if DB is not connected)
     if (username === 'admin' && password === 'admin123') {
       const token = jwt.sign(
         { username: 'admin', role: 'superadmin' },
@@ -382,29 +445,39 @@ app.post('/admin/login', async (req, res) => {
       
       return res.json({
         success: true,
-        message: 'Login successful',
-        token,
-        user: { username: 'admin', role: 'superadmin' }
+        message: 'Login successful with default credentials',
+        token: token,
+        user: {
+          username: 'admin',
+          role: 'superadmin'
+        }
       });
     }
     
-    // If DB connected, check database
+    // If database is connected, check in database
     if (mongoose.connection.readyState === 1) {
       const admin = await Admin.findOne({ username });
       
-      if (admin && await bcrypt.compare(password, admin.password)) {
-        const token = jwt.sign(
-          { id: admin._id, username: admin.username, role: admin.role },
-          JWT_SECRET,
-          { expiresIn: '24h' }
-        );
+      if (admin) {
+        const isValid = await bcrypt.compare(password, admin.password);
         
-        return res.json({
-          success: true,
-          message: 'Login successful',
-          token,
-          user: { username: admin.username, role: admin.role }
-        });
+        if (isValid) {
+          const token = jwt.sign(
+            { id: admin._id, username: admin.username, role: admin.role },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+          );
+          
+          return res.json({
+            success: true,
+            message: 'Login successful',
+            token: token,
+            user: {
+              username: admin.username,
+              role: admin.role
+            }
+          });
+        }
       }
     }
     
@@ -417,13 +490,13 @@ app.post('/admin/login', async (req, res) => {
     console.error('Login error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error'
+      message: 'Login failed'
     });
   }
 });
 
 // Student Registration
-app.post('/api/register', checkDBConnection, async (req, res) => {
+app.post('/api/register', checkDB, async (req, res) => {
   try {
     const { name, rollNumber, category } = req.body;
     
@@ -442,7 +515,7 @@ app.post('/api/register', checkDBConnection, async (req, res) => {
     if (existing) {
       return res.status(400).json({
         success: false,
-        message: 'Student already registered'
+        message: 'This roll number is already registered'
       });
     }
     
@@ -457,7 +530,12 @@ app.post('/api/register', checkDBConnection, async (req, res) => {
     res.json({
       success: true,
       message: 'Registration successful',
-      data: registration
+      data: {
+        name: registration.name,
+        rollNumber: registration.rollNumber,
+        category: registration.category,
+        registeredAt: registration.registeredAt
+      }
     });
     
   } catch (error) {
@@ -478,8 +556,12 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
       return res.json({
         success: true,
         questions: [],
-        count: 0,
-        message: 'Database not connected'
+        message: 'Database not connected',
+        config: {
+          quizTime: 30,
+          passingPercentage: 40,
+          totalQuestions: 50
+        }
       });
     }
     
@@ -487,25 +569,27 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
       category: category.toLowerCase() 
     });
     
-    // Hide correct answers
-    const safeQuestions = questions.map(q => ({
-      _id: q._id,
-      category: q.category,
-      questionText: q.questionText,
-      options: q.options.map(opt => ({ text: opt.text })),
-      marks: q.marks,
-      difficulty: q.difficulty
-    }));
-    
+    // Get config
     const config = await Config.findOne() || {
       quizTime: 30,
       passingPercentage: 40,
       totalQuestions: 50
     };
     
+    // Hide correct answers for students
+    const safeQuestions = questions
+      .sort(() => 0.5 - Math.random())
+      .slice(0, Math.min(config.totalQuestions, questions.length))
+      .map(q => ({
+        _id: q._id,
+        questionText: q.questionText,
+        options: q.options.map(opt => ({ text: opt.text })),
+        marks: q.marks
+      }));
+    
     res.json({
       success: true,
-      questions: safeQuestions.slice(0, config.totalQuestions),
+      questions: safeQuestions,
       count: safeQuestions.length,
       config: {
         quizTime: config.quizTime,
@@ -518,85 +602,81 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
     console.error('Get questions error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching questions'
+      message: 'Error loading questions'
     });
   }
 });
 
 // Submit Quiz
-app.post('/api/quiz/submit', async (req, res) => {
+app.post('/api/quiz/submit', checkDB, async (req, res) => {
   try {
     const { 
-      rollNumber, 
       name, 
+      rollNumber, 
       category, 
       score, 
       percentage, 
-      totalQuestions, 
-      correctAnswers 
+      correctAnswers, 
+      totalQuestions,
+      attempted 
     } = req.body;
     
-    if (!rollNumber || !name || !category) {
+    if (!name || !rollNumber || !category) {
       return res.status(400).json({
         success: false,
         message: 'Required fields missing'
       });
     }
     
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        success: false,
-        message: 'Database not connected. Result not saved.'
-      });
-    }
-    
     const config = await Config.findOne() || { passingPercentage: 40 };
     
-    const user = new User({
+    const userResult = new User({
       name,
       rollNumber: rollNumber.startsWith('SI-') ? rollNumber : `SI-${rollNumber}`,
       category: category.toLowerCase(),
       score: score || 0,
       percentage: percentage || 0,
-      totalMarks: totalQuestions || 0,
-      obtainedMarks: score || 0,
       correctAnswers: correctAnswers || 0,
       totalQuestions: totalQuestions || 0,
-      attempted: totalQuestions || 0,
+      attempted: attempted || 0,
+      totalMarks: totalQuestions || 0,
+      obtainedMarks: score || 0,
       passingPercentage: config.passingPercentage,
       passed: (percentage || 0) >= config.passingPercentage
     });
     
-    await user.save();
+    await userResult.save();
     
     res.json({
       success: true,
       message: 'Quiz submitted successfully',
-      result: user
+      result: {
+        _id: userResult._id,
+        name: userResult.name,
+        rollNumber: userResult.rollNumber,
+        score: userResult.score,
+        percentage: userResult.percentage,
+        correctAnswers: userResult.correctAnswers,
+        totalQuestions: userResult.totalQuestions,
+        passed: userResult.passed,
+        submittedAt: userResult.submittedAt
+      }
     });
     
   } catch (error) {
-    console.error('Submit quiz error:', error);
+    console.error('Submit error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error submitting quiz'
+      message: 'Failed to submit quiz'
     });
   }
 });
 
-// ==================== ADMIN ROUTES ====================
+// ==================== ADMIN PROTECTED ROUTES ====================
 
-// Dashboard Stats
-app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
+// Admin Dashboard
+app.get('/api/admin/dashboard', verifyToken, checkDB, async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) {
-      return res.json({
-        success: false,
-        message: 'Database not connected',
-        stats: {}
-      });
-    }
-    
     const [
       totalStudents,
       totalQuestions,
@@ -617,13 +697,15 @@ app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
     if (results.length > 0) {
       const totalPercentage = results.reduce((sum, r) => sum + (r.percentage || 0), 0);
       averageScore = totalPercentage / results.length;
+      
       const passedCount = results.filter(r => r.passed).length;
       passRate = (passedCount / results.length) * 100;
     }
     
-    const config = await Config.findOne() || { 
-      quizTime: 30, 
-      passingPercentage: 40 
+    const config = await Config.findOne() || {
+      quizTime: 30,
+      passingPercentage: 40,
+      totalQuestions: 50
     };
     
     res.json({
@@ -644,21 +726,33 @@ app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
     console.error('Dashboard error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching dashboard'
+      message: 'Error loading dashboard'
     });
   }
 });
 
-// Add Question
-app.post('/api/admin/questions', verifyToken, async (req, res) => {
+// Get all results
+app.get('/api/admin/results', verifyToken, checkDB, async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        success: false,
-        message: 'Database not connected'
-      });
-    }
+    const results = await User.find().sort({ submittedAt: -1 });
     
+    res.json({
+      success: true,
+      results: results,
+      count: results.length
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching results'
+    });
+  }
+});
+
+// Add question
+app.post('/api/admin/questions', verifyToken, checkDB, async (req, res) => {
+  try {
     const { category, questionText, options } = req.body;
     
     if (!category || !questionText || !options || options.length < 2) {
@@ -678,12 +772,11 @@ app.post('/api/admin/questions', verifyToken, async (req, res) => {
     
     res.json({
       success: true,
-      message: 'Question added',
-      question
+      message: 'Question added successfully',
+      question: question
     });
     
   } catch (error) {
-    console.error('Add question error:', error);
     res.status(500).json({
       success: false,
       message: 'Error adding question'
@@ -691,46 +784,20 @@ app.post('/api/admin/questions', verifyToken, async (req, res) => {
   }
 });
 
-// Get Results
-app.get('/api/admin/results', verifyToken, async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1) {
-      return res.json({
-        success: false,
-        message: 'Database not connected',
-        results: []
-      });
-    }
-    
-    const results = await User.find().sort({ submittedAt: -1 });
-    
-    res.json({
-      success: true,
-      results,
-      count: results.length
-    });
-    
-  } catch (error) {
-    console.error('Get results error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching results'
-    });
-  }
-});
-
-// Reset Admin Password
+// Reset admin password
 app.post('/admin/reset', async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res.json({
+      return res.status(503).json({
         success: false,
         message: 'Database not connected'
       });
     }
     
+    // Delete existing admin
     await Admin.deleteMany({ username: 'admin' });
     
+    // Create new admin
     const hashedPassword = await bcrypt.hash('admin123', 10);
     await Admin.create({
       username: 'admin',
@@ -741,11 +808,10 @@ app.post('/admin/reset', async (req, res) => {
     
     res.json({
       success: true,
-      message: 'Admin reset successfully'
+      message: 'Admin reset successfully. Use username: admin, password: admin123'
     });
     
   } catch (error) {
-    console.error('Reset error:', error);
     res.status(500).json({
       success: false,
       message: 'Error resetting admin'
@@ -757,7 +823,8 @@ app.post('/admin/reset', async (req, res) => {
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: 'Route not found'
+    message: 'Route not found',
+    path: req.path
   });
 });
 
@@ -765,7 +832,8 @@ app.use((err, req, res, next) => {
   console.error('Server error:', err);
   res.status(500).json({
     success: false,
-    message: 'Internal server error'
+    message: 'Internal server error',
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
 
@@ -773,6 +841,6 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📡 MongoDB Status: ${getConnectionState()}`);
-  console.log(`🔄 Connection String: ${MONGODB_URI ? 'Set' : 'Not set'}`);
+  console.log(`📡 MongoDB State: ${getConnectionState()}`);
+  console.log(`🔗 Vercel: ${process.env.VERCEL ? 'Yes' : 'No'}`);
 });
