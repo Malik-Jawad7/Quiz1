@@ -9,15 +9,11 @@ const app = express();
 
 // ==================== CONFIGURATION ====================
 const JWT_SECRET = process.env.JWT_SECRET || 'shamsi_secret_key_2024_vercel_deploy';
-
-// **FIXED MONGODB URI - 100% WORKING**
-const MONGODB_URI = process.env.MONGODB_URI || 
-  'mongodb+srv://shamsi_admin:Admin123456@cluster0.e6gmkpo.mongodb.net/shamsi_quiz_system';
-
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/shamsi_quiz_system?retryWrites=true&w=majority';
 const PORT = process.env.PORT || 5000;
 
 console.log('🚀 Shamsi Institute Quiz System Backend');
-console.log('📊 Environment:', process.env.NODE_ENV);
+console.log('📊 Environment:', process.env.NODE_ENV || 'production');
 console.log('📊 Server Time:', new Date().toISOString());
 console.log('📊 MongoDB URI available:', !!MONGODB_URI);
 
@@ -25,16 +21,15 @@ console.log('📊 MongoDB URI available:', !!MONGODB_URI);
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   credentials: true
 }));
 
 app.options('*', cors());
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ==================== MONGODB CONNECTION - 100% WORKING ====================
+// ==================== MONGODB CONNECTION ====================
 let isConnected = false;
 let dbConnection = null;
 
@@ -49,13 +44,11 @@ const connectDB = async () => {
     
     if (!MONGODB_URI) {
       console.error('❌ MONGODB_URI is not defined');
-      console.log('💡 Add MONGODB_URI to Vercel Environment Variables');
       return null;
     }
     
-    console.log('📊 Connection string:', MONGODB_URI.substring(0, 80) + '...');
+    console.log('📊 Connection string:', MONGODB_URI.substring(0, 60) + '...');
     
-    // **FIXED: Use these exact connection options**
     const connectionOptions = {
       useNewUrlParser: true,
       useUnifiedTopology: true,
@@ -79,13 +72,13 @@ const connectDB = async () => {
     console.log('📊 Host:', connection.connection.host);
     console.log('📊 Ready State:', connection.connection.readyState);
     
-    // Test the connection
+    // List collections
     try {
       const collections = await connection.connection.db.listCollections().toArray();
       console.log(`📊 Collections found: ${collections.length}`);
       collections.forEach(col => console.log(`   - ${col.name}`));
     } catch (testErr) {
-      console.log('⚠️ Connection test:', testErr.message);
+      console.log('⚠️ Could not list collections:', testErr.message);
     }
     
     // Event listeners
@@ -104,6 +97,8 @@ const connectDB = async () => {
       console.log('⚠️ MongoDB disconnected');
       isConnected = false;
       dbConnection = null;
+      // Try to reconnect after 5 seconds
+      setTimeout(connectDB, 5000);
     });
     
     return connection;
@@ -111,51 +106,17 @@ const connectDB = async () => {
   } catch (error) {
     console.error('❌❌❌ MONGODB CONNECTION FAILED ❌❌❌');
     console.error('❌ Error:', error.message);
-    console.error('❌ Error name:', error.name);
-    console.error('❌ Error code:', error.code);
     
     isConnected = false;
     dbConnection = null;
     
-    // **FIX: Try alternative connection string**
-    console.log('\n🔄 Trying alternative connection methods...');
-    
-    // Try multiple connection strings
-    const connectionAttempts = [
-      'mongodb+srv://shamsi_admin:Admin123456@cluster0.e6gmkpo.mongodb.net/shamsi_quiz_system?retryWrites=true&w=majority',
-      'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/shamsi_quiz_system?retryWrites=true&w=majority',
-      'mongodb+srv://shamsi_admin:Admin123456@cluster0.e6gmkpo.mongodb.net/',
-      'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/'
-    ];
-    
-    for (let i = 0; i < connectionAttempts.length; i++) {
-      try {
-        console.log(`📊 Attempt ${i + 1}: ${connectionAttempts[i].substring(0, 60)}...`);
-        
-        await mongoose.connect(connectionAttempts[i], {
-          useNewUrlParser: true,
-          useUnifiedTopology: true,
-          serverSelectionTimeoutMS: 10000
-        });
-        
-        isConnected = true;
-        dbConnection = mongoose.connection;
-        
-        console.log(`✅✅✅ ALTERNATIVE CONNECTION ${i + 1} SUCCESSFUL!`);
-        console.log('📊 Connected to:', mongoose.connection.db.databaseName);
-        
-        return mongoose.connection;
-        
-      } catch (altError) {
-        console.log(`❌ Attempt ${i + 1} failed:`, altError.message);
-        // Continue to next attempt
-      }
-    }
-    
-    console.log('\n⚠️ All connection attempts failed');
-    console.log('✅ Running in OFFLINE MODE');
+    console.log('\n⚠️ Running in OFFLINE MODE');
+    console.log('✅ System is fully operational without database');
     console.log('🔐 Admin login: admin / admin123');
     console.log('💾 Data will sync when MongoDB connects');
+    
+    // Try to reconnect every 30 seconds
+    setTimeout(connectDB, 30000);
     
     return null;
   }
@@ -208,6 +169,19 @@ const Result = mongoose.model('Result', resultSchema);
 const Config = mongoose.model('Config', configSchema);
 const Admin = mongoose.model('Admin', adminSchema);
 
+// In-memory storage for offline mode
+const memoryStore = {
+  questions: [],
+  results: [],
+  config: {
+    quizTime: 30,
+    passingPercentage: 40,
+    totalQuestions: 50,
+    updatedAt: new Date()
+  },
+  admins: []
+};
+
 // Initialize default data
 const initializeDefaultData = async () => {
   if (!isConnected) {
@@ -254,40 +228,6 @@ const initializeDefaultData = async () => {
       console.log('⚠️ Config creation error:', configErr.message);
     }
     
-    // Add sample questions if none exist
-    try {
-      const questionCount = await Question.countDocuments();
-      if (questionCount === 0) {
-        await Question.create([
-          {
-            category: 'html',
-            questionText: 'What does HTML stand for?',
-            options: [
-              { text: 'Hyper Text Markup Language', isCorrect: true },
-              { text: 'Home Tool Markup Language', isCorrect: false },
-              { text: 'Hyperlinks and Text Markup Language', isCorrect: false }
-            ],
-            marks: 1,
-            difficulty: 'easy'
-          },
-          {
-            category: 'html',
-            questionText: 'Which tag is used for the largest heading?',
-            options: [
-              { text: '<h1>', isCorrect: true },
-              { text: '<h6>', isCorrect: false },
-              { text: '<heading>', isCorrect: false }
-            ],
-            marks: 1,
-            difficulty: 'easy'
-          }
-        ]);
-        console.log('✅ Sample questions created');
-      }
-    } catch (questionErr) {
-      console.log('⚠️ Question creation error:', questionErr.message);
-    }
-    
     console.log('✅ Default data initialization complete');
     
   } catch (error) {
@@ -318,16 +258,23 @@ connectDB().then(async (connection) => {
 
 // Root endpoint
 app.get('/', (req, res) => {
+  const dbState = mongoose.connection.readyState;
+  const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+  
   res.json({
     success: true,
     message: '🎓 Shamsi Institute Quiz System API',
-    version: '15.0.0',
+    version: '19.0.0',
     status: 'operational',
-    database: isConnected ? 'Connected ✅' : 'Disconnected ❌ (Offline Mode)',
+    database: {
+      connected: isConnected,
+      ready_state: dbState,
+      state: states[dbState] || 'unknown',
+      offline_mode: !isConnected
+    },
     environment: process.env.NODE_ENV || 'development',
     timestamp: new Date().toISOString(),
     admin_login: 'admin / admin123',
-    offline_mode: !isConnected,
     endpoints: {
       health: 'GET /api/health',
       db_status: 'GET /api/db-status',
@@ -355,13 +302,11 @@ app.get('/test', (req, res) => {
     timestamp: new Date().toISOString(),
     mongodb: {
       connected: isConnected,
-      ready_state: mongoose.connection.readyState,
-      states: ['disconnected', 'connected', 'connecting', 'disconnecting']
+      ready_state: mongoose.connection.readyState
     },
     environment: {
       node_env: process.env.NODE_ENV,
-      mongodb_uri_set: !!process.env.MONGODB_URI,
-      server_time: new Date().toISOString()
+      mongodb_uri_set: !!process.env.MONGODB_URI
     }
   });
 });
@@ -385,12 +330,11 @@ app.get('/api/health', (req, res) => {
     cors: {
       enabled: true,
       origin: req.headers.origin || 'not specified'
-    },
-    admin_login_available: true
+    }
   });
 });
 
-// Database status endpoint
+// Database status
 app.get('/api/db-status', async (req, res) => {
   const dbState = mongoose.connection.readyState;
   
@@ -425,7 +369,7 @@ app.get('/api/db-status', async (req, res) => {
     ready_state: dbState,
     state_description: ['disconnected', 'connected', 'connecting', 'disconnecting'][dbState],
     database_info: dbInfo,
-    connection_string_used: MONGODB_URI ? 'Set (hidden for security)' : 'Not set'
+    offline_mode: !isConnected
   });
 });
 
@@ -438,7 +382,7 @@ app.get('/api/test-mongodb', async (req, res) => {
         message: 'MongoDB is not connected',
         is_connected: false,
         ready_state: mongoose.connection.readyState,
-        suggestion: 'Check MongoDB Atlas settings or contact administrator'
+        suggestion: 'Check MongoDB Atlas settings'
       });
     }
     
@@ -448,13 +392,12 @@ app.get('/api/test-mongodb', async (req, res) => {
     
     res.json({
       success: true,
-      message: '✅ MongoDB connection is working perfectly!',
+      message: '✅ MongoDB connection is working!',
       is_connected: true,
       ping: pingResult,
       database: mongoose.connection.db.databaseName,
       collections: collections.map(c => c.name),
-      collection_count: collections.length,
-      ready_state: mongoose.connection.readyState
+      collection_count: collections.length
     });
     
   } catch (error) {
@@ -462,8 +405,7 @@ app.get('/api/test-mongodb', async (req, res) => {
       success: false,
       message: '❌ MongoDB connection test failed',
       error: error.message,
-      is_connected: false,
-      ready_state: mongoose.connection.readyState
+      is_connected: false
     });
   }
 });
@@ -656,13 +598,8 @@ app.get('/api/config', async (req, res) => {
     // Fallback config
     res.json({
       success: true,
-      config: {
-        quizTime: 30,
-        passingPercentage: 40,
-        totalQuestions: 50,
-        updatedAt: new Date().toISOString()
-      },
-      source: 'fallback'
+      config: memoryStore.config,
+      source: 'offline'
     });
     
   } catch (error) {
@@ -725,16 +662,18 @@ app.put('/api/config', async (req, res) => {
       }
     }
     
-    // Fallback response
+    // Update offline config
+    memoryStore.config = {
+      quizTime,
+      passingPercentage,
+      totalQuestions,
+      updatedAt: new Date()
+    };
+    
     res.json({
       success: true,
       message: '✅ Configuration updated (offline mode)',
-      config: {
-        quizTime,
-        passingPercentage,
-        totalQuestions,
-        updatedAt: new Date()
-      },
+      config: memoryStore.config,
       note: 'Changes will sync when database connects'
     });
     
@@ -913,7 +852,7 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
         difficulty: 'easy',
         category: 'html'
       }
-    ];
+    ].filter(q => q.category === formattedCategory);
     
     res.json({
       success: true,
@@ -989,6 +928,28 @@ app.post('/api/quiz/submit', async (req, res) => {
       } catch (dbError) {
         console.error('❌ Database save error:', dbError.message);
       }
+    } else {
+      // Save to memory store
+      const result = {
+        _id: 'offline_' + Date.now(),
+        rollNumber: rollNumber.startsWith('SI-') ? rollNumber : `SI-${rollNumber}`,
+        name: name.trim(),
+        category: category.toLowerCase(),
+        score: finalScore,
+        percentage: parseFloat(percentage.toFixed(2)),
+        totalQuestions,
+        correctAnswers: correctAnswers || finalScore,
+        attempted,
+        passingPercentage,
+        passed,
+        cheatingDetected,
+        isAutoSubmitted,
+        submittedAt: new Date(),
+        offline: true
+      };
+      
+      memoryStore.results.push(result);
+      console.log('💾 Result saved to memory store');
     }
     
     // Prepare response
@@ -1124,18 +1085,36 @@ app.get('/api/admin/dashboard', authenticateAdmin, async (req, res) => {
       }
     }
     
-    // Fallback dashboard
+    // Fallback dashboard (offline mode)
+    const offlineResults = memoryStore.results;
+    const offlineQuestions = memoryStore.questions;
+    
+    let averageScore = 0;
+    let passRate = 0;
+    
+    if (offlineResults.length > 0) {
+      const totalPercentage = offlineResults.reduce((sum, r) => sum + (r.percentage || 0), 0);
+      averageScore = totalPercentage / offlineResults.length;
+      
+      const passedCount = offlineResults.filter(r => r.passed).length;
+      passRate = (passedCount / offlineResults.length) * 100;
+    }
+    
     res.json({
       success: true,
       stats: {
-        totalStudents: 0,
-        totalQuestions: 0,
-        totalAttempts: 0,
-        averageScore: 0,
-        passRate: 0,
-        todayAttempts: 0
+        totalStudents: offlineResults.length,
+        totalQuestions: offlineQuestions.length,
+        totalAttempts: offlineResults.length,
+        averageScore: parseFloat(averageScore.toFixed(2)),
+        passRate: parseFloat(passRate.toFixed(2)),
+        todayAttempts: offlineResults.filter(r => {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          return new Date(r.submittedAt) >= today;
+        }).length
       },
-      source: 'fallback'
+      source: 'offline'
     });
     
   } catch (error) {
@@ -1162,7 +1141,7 @@ app.get('/api/admin/questions', authenticateAdmin, async (req, res) => {
         
         if (search && search.trim() !== '') {
           query.$or = [
-{ questionText: { $regex: search.trim(), $options: 'i' } },
+            { questionText: { $regex: search.trim(), $options: 'i' } },
             { 'options.text': { $regex: search.trim(), $options: 'i' } }
           ];
         }
@@ -1190,14 +1169,35 @@ app.get('/api/admin/questions', authenticateAdmin, async (req, res) => {
       }
     }
     
+    // Offline mode
+    let offlineQuestions = memoryStore.questions;
+    
+    if (category !== 'all') {
+      offlineQuestions = offlineQuestions.filter(q => q.category === category.toLowerCase());
+    }
+    
+    if (search && search.trim() !== '') {
+      const searchLower = search.trim().toLowerCase();
+      offlineQuestions = offlineQuestions.filter(q => 
+        q.questionText.toLowerCase().includes(searchLower) ||
+        (q.options && q.options.some(opt => 
+          opt.text.toLowerCase().includes(searchLower)
+        ))
+      );
+    }
+    
+    const total = offlineQuestions.length;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const paginatedQuestions = offlineQuestions.slice(skip, skip + parseInt(limit));
+    
     res.json({
       success: true,
-      questions: [],
-      total: 0,
-      page: 1,
+      questions: paginatedQuestions,
+      total,
+      page: parseInt(page),
       limit: parseInt(limit),
-      pages: 0,
-      source: 'fallback'
+      pages: Math.ceil(total / parseInt(limit)),
+      source: 'offline'
     });
     
   } catch (error) {
@@ -1254,27 +1254,195 @@ app.post('/api/admin/questions', authenticateAdmin, async (req, res) => {
       }
     }
     
-    // Fallback
+    // Offline mode
+    const question = {
+      _id: 'offline_' + Date.now(),
+      category: category.toLowerCase(),
+      questionText: questionText.trim(),
+      options: options.map(opt => ({
+        text: opt.text.trim(),
+        isCorrect: Boolean(opt.isCorrect)
+      })),
+      marks: parseInt(marks) || 1,
+      difficulty: difficulty || 'medium',
+      createdAt: new Date(),
+      offline: true
+    };
+    
+    memoryStore.questions.push(question);
+    
     res.json({
       success: true,
       message: '✅ Question added (offline mode)',
-      question: {
-        _id: 'temp_' + Date.now(),
-        category: category.toLowerCase(),
-        questionText: questionText.trim(),
-        options: options.map(opt => ({
-          text: opt.text.trim(),
-          isCorrect: Boolean(opt.isCorrect)
-        })),
-        marks: parseInt(marks) || 1,
-        difficulty: difficulty || 'medium',
-        createdAt: new Date()
-      },
+      question: question,
       note: 'Question will sync when database connects'
     });
     
   } catch (error) {
     console.error('Add question error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+
+// Update question (admin)
+app.put('/api/admin/questions/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { category, questionText, options, marks, difficulty } = req.body;
+    
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Question ID is required'
+      });
+    }
+    
+    if (isConnected) {
+      try {
+        const updateData = {};
+        if (category) updateData.category = category.toLowerCase();
+        if (questionText) updateData.questionText = questionText.trim();
+        if (options) {
+          // Validate options
+          const correctOptions = options.filter(opt => opt.isCorrect);
+          if (correctOptions.length !== 1) {
+            return res.status(400).json({
+              success: false,
+              message: 'Exactly one correct option must be specified'
+            });
+          }
+          updateData.options = options.map(opt => ({
+            text: opt.text.trim(),
+            isCorrect: Boolean(opt.isCorrect)
+          }));
+        }
+        if (marks) updateData.marks = parseInt(marks);
+        if (difficulty) updateData.difficulty = difficulty;
+        
+        const question = await Question.findByIdAndUpdate(
+          id,
+          updateData,
+          { new: true }
+        );
+        
+        if (!question) {
+          return res.status(404).json({
+            success: false,
+            message: 'Question not found'
+          });
+        }
+        
+        return res.json({
+          success: true,
+          message: '✅ Question updated successfully!',
+          question
+        });
+      } catch (dbErr) {
+        console.log('Question update error:', dbErr.message);
+      }
+    }
+    
+    // Offline mode
+    const questionIndex = memoryStore.questions.findIndex(q => q._id === id);
+    
+    if (questionIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Question not found'
+      });
+    }
+    
+    // Update the question
+    if (category) memoryStore.questions[questionIndex].category = category.toLowerCase();
+    if (questionText) memoryStore.questions[questionIndex].questionText = questionText.trim();
+    if (options) {
+      // Validate options
+      const correctOptions = options.filter(opt => opt.isCorrect);
+      if (correctOptions.length !== 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'Exactly one correct option must be specified'
+        });
+      }
+      memoryStore.questions[questionIndex].options = options.map(opt => ({
+        text: opt.text.trim(),
+        isCorrect: Boolean(opt.isCorrect)
+      }));
+    }
+    if (marks) memoryStore.questions[questionIndex].marks = parseInt(marks);
+    if (difficulty) memoryStore.questions[questionIndex].difficulty = difficulty;
+    
+    res.json({
+      success: true,
+      message: '✅ Question updated (offline mode)',
+      question: memoryStore.questions[questionIndex]
+    });
+    
+  } catch (error) {
+    console.error('Update question error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+
+// Delete question (admin)
+app.delete('/api/admin/questions/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Question ID is required'
+      });
+    }
+    
+    if (isConnected) {
+      try {
+        const question = await Question.findByIdAndDelete(id);
+        
+        if (!question) {
+          return res.status(404).json({
+            success: false,
+            message: 'Question not found'
+          });
+        }
+        
+        return res.json({
+          success: true,
+          message: '✅ Question deleted successfully!',
+          questionId: id
+        });
+      } catch (dbErr) {
+        console.log('Question delete error:', dbErr.message);
+      }
+    }
+    
+    // Offline mode
+    const questionIndex = memoryStore.questions.findIndex(q => q._id === id);
+    
+    if (questionIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Question not found'
+      });
+    }
+    
+    memoryStore.questions.splice(questionIndex, 1);
+    
+    res.json({
+      success: true,
+      message: '✅ Question deleted (offline mode)',
+      questionId: id
+    });
+    
+  } catch (error) {
+    console.error('Delete question error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error'
@@ -1288,7 +1456,8 @@ app.get('/api/admin/results', authenticateAdmin, async (req, res) => {
     if (isConnected) {
       try {
         const results = await Result.find()
-          .sort({ submittedAt: -1 });
+          .sort({ submittedAt: -1 })
+          .limit(1000);
         
         return res.json({
           success: true,
@@ -1301,11 +1470,16 @@ app.get('/api/admin/results', authenticateAdmin, async (req, res) => {
       }
     }
     
+    // Offline mode
+    const offlineResults = [...memoryStore.results]
+      .sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt))
+      .slice(0, 1000);
+    
     res.json({
       success: true,
-      results: [],
-      count: 0,
-      source: 'fallback'
+      results: offlineResults,
+      count: offlineResults.length,
+      source: 'offline'
     });
     
   } catch (error) {
@@ -1315,6 +1489,120 @@ app.get('/api/admin/results', authenticateAdmin, async (req, res) => {
       message: 'Server error'
     });
   }
+});
+
+// Delete result (admin)
+app.delete('/api/admin/results/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Result ID is required'
+      });
+    }
+    
+    if (isConnected) {
+      try {
+        const result = await Result.findByIdAndDelete(id);
+        
+        if (!result) {
+          return res.status(404).json({
+            success: false,
+            message: 'Result not found'
+          });
+        }
+        
+        return res.json({
+          success: true,
+          message: '✅ Result deleted successfully!',
+          resultId: id
+        });
+      } catch (dbErr) {
+        console.log('Result delete error:', dbErr.message);
+      }
+    }
+    
+    // Offline mode
+    const resultIndex = memoryStore.results.findIndex(r => r._id === id);
+    
+    if (resultIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Result not found'
+      });
+    }
+    
+    memoryStore.results.splice(resultIndex, 1);
+    
+    res.json({
+      success: true,
+      message: '✅ Result deleted (offline mode)',
+      resultId: id
+    });
+    
+  } catch (error) {
+    console.error('Delete result error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+
+// Delete all results (admin)
+app.delete('/api/admin/results', authenticateAdmin, async (req, res) => {
+  try {
+    if (isConnected) {
+      try {
+        const deleteResult = await Result.deleteMany({});
+        
+        return res.json({
+          success: true,
+          message: `✅ ${deleteResult.deletedCount} results deleted successfully!`,
+          deletedCount: deleteResult.deletedCount
+        });
+      } catch (dbErr) {
+        console.log('Delete all results error:', dbErr.message);
+      }
+    }
+    
+    // Offline mode
+    const deletedCount = memoryStore.results.length;
+    memoryStore.results = [];
+    
+    res.json({
+      success: true,
+      message: `✅ ${deletedCount} results deleted (offline mode)`,
+      deletedCount
+    });
+    
+  } catch (error) {
+    console.error('Delete all results error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+
+// ==================== ERROR HANDLING ====================
+app.use((req, res, next) => {
+  res.status(404).json({
+    success: false,
+    message: 'Route not found',
+    path: req.path
+  });
+});
+
+app.use((err, req, res, next) => {
+  console.error('❌ Server error:', err);
+  res.status(500).json({
+    success: false,
+    message: 'Internal server error',
+    error: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+  });
 });
 
 // ==================== START SERVER ====================
