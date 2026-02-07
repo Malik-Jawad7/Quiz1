@@ -7,16 +7,12 @@ const jwt = require('jsonwebtoken');
 const app = express();
 
 // ==================== CONFIGURATION ====================
-const PORT = process.env.PORT || 5000;
-
-// IMPORTANT: MongoDB Atlas se exact connection string copy karein
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority&appName=Cluster0';
 const JWT_SECRET = process.env.JWT_SECRET || 'shamsi_secret_2024';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority&appName=Cluster0';
 
-console.log('🚀 Starting Quiz System...');
-console.log('📡 MongoDB Connection Status:', MONGODB_URI ? 'Configured' : 'Not Configured');
+console.log('🚀 Vercel Serverless Function Starting...');
 
-// ==================== CORS CONFIGURATION ====================
+// ==================== CORS ====================
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -25,253 +21,146 @@ app.use(cors({
 app.use(express.json());
 
 // ==================== MONGODB CONNECTION ====================
-// Connection status tracking
-let dbConnectionStatus = 'disconnected';
+let dbConnected = false;
 
-const connectToDatabase = async () => {
+const connectDB = async () => {
+  if (dbConnected) return true;
+  
   try {
-    // Agar already connected hai
-    if (mongoose.connection.readyState === 1) {
-      console.log('✅ Already connected to MongoDB');
-      dbConnectionStatus = 'connected';
-      return true;
-    }
+    console.log('🔗 Connecting to MongoDB...');
     
-    console.log('🔄 Attempting to connect to MongoDB Atlas...');
-    dbConnectionStatus = 'connecting';
-    
-    // Connection string format
-    const connectionString = MONGODB_URI;
-    
-    console.log('📊 Using connection string:', connectionString ? 'Set' : 'Not set');
-    
-    // Connection options for Vercel
-    const connectionOptions = {
-      serverSelectionTimeoutMS: 10000,
+    await mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
       connectTimeoutMS: 10000,
       maxPoolSize: 5,
-      minPoolSize: 1,
-      family: 4, // Use IPv4
-      ssl: true, // Force SSL for Vercel
-      tlsAllowInvalidCertificates: false
-    };
+    });
     
-    // Connect
-    await mongoose.connect(connectionString, connectionOptions);
-    
-    console.log('🎉 SUCCESS: MongoDB Atlas Connected!');
-    console.log('📁 Database:', mongoose.connection.db?.databaseName || 'quiz_system');
-    console.log('🌐 Host:', mongoose.connection.host);
-    
-    dbConnectionStatus = 'connected';
-    
-    // Initialize database
-    await initializeDatabase();
-    
+    console.log('✅ MongoDB Connected');
+    dbConnected = true;
     return true;
     
   } catch (error) {
-    console.error('❌ MongoDB Connection FAILED!');
-    console.error('🔍 Error:', error.message);
-    console.error('📝 Error Code:', error.code || 'N/A');
-    console.error('💡 Solution Steps:');
-    console.error('   1. Go to MongoDB Atlas Dashboard');
-    console.error('   2. Click "Network Access"');
-    console.error('   3. Add IP Address: 0.0.0.0/0');
-    console.error('   4. Save and wait 1-2 minutes');
-    
-    dbConnectionStatus = 'disconnected';
+    console.error('❌ MongoDB Connection Failed:', error.message);
+    dbConnected = false;
     return false;
   }
 };
 
-// Connect on startup
-connectToDatabase();
-
-// Reconnection logic
-setInterval(async () => {
-  if (dbConnectionStatus !== 'connected') {
-    console.log('🔄 Attempting reconnection...');
-    await connectToDatabase();
-  }
-}, 30000); // Try every 30 seconds
-
 // ==================== DATABASE SCHEMAS ====================
-// Simple schemas
 const userSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  rollNumber: { type: String, required: true },
-  category: { type: String, required: true },
-  score: { type: Number, default: 0 },
-  percentage: { type: Number, default: 0 },
-  passed: { type: Boolean, default: false },
-  submittedAt: { type: Date, default: Date.now }
-}, { timestamps: true });
+  name: String,
+  rollNumber: String,
+  category: String,
+  score: Number,
+  percentage: Number,
+  passed: Boolean,
+  submittedAt: Date
+});
 
 const registrationSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  rollNumber: { type: String, required: true },
-  category: { type: String, required: true },
-  registeredAt: { type: Date, default: Date.now }
-}, { timestamps: true });
+  name: String,
+  rollNumber: String,
+  category: String,
+  registeredAt: Date
+});
 
 const questionSchema = new mongoose.Schema({
-  category: { type: String, required: true },
-  questionText: { type: String, required: true },
+  category: String,
+  questionText: String,
   options: [{
-    text: { type: String, required: true },
-    isCorrect: { type: Boolean, default: false }
+    text: String,
+    isCorrect: Boolean
   }],
-  marks: { type: Number, default: 1 }
-}, { timestamps: true });
+  marks: Number
+});
 
 const adminSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  role: { type: String, default: 'admin' }
-}, { timestamps: true });
+  username: String,
+  password: String,
+  role: String
+});
 
-// Create models (with try-catch to prevent errors)
-let User, Registration, Question, Admin;
-
-try {
-  User = mongoose.model('User') || mongoose.model('User', userSchema);
-  Registration = mongoose.model('Registration') || mongoose.model('Registration', registrationSchema);
-  Question = mongoose.model('Question') || mongoose.model('Question', questionSchema);
-  Admin = mongoose.model('Admin') || mongoose.model('Admin', adminSchema);
-} catch (error) {
-  // Models already defined
-  User = mongoose.model('User');
-  Registration = mongoose.model('Registration');
-  Question = mongoose.model('Question');
-  Admin = mongoose.model('Admin');
-}
-
-// ==================== DATABASE INITIALIZATION ====================
-async function initializeDatabase() {
-  try {
-    console.log('🔄 Setting up database...');
-    
-    // Create default admin
-    const adminExists = await Admin.findOne({ username: 'admin' });
-    if (!adminExists) {
-      const hashedPassword = await bcrypt.hash('admin123', 10);
-      await Admin.create({
-        username: 'admin',
-        password: hashedPassword,
-        role: 'superadmin'
-      });
-      console.log('✅ Default admin created: admin / admin123');
-    }
-    
-    console.log('📊 Database setup complete');
-    
-  } catch (error) {
-    console.error('❌ Database setup error:', error.message);
-  }
-}
-
-// ==================== MIDDLEWARE ====================
-const verifyToken = (req, res, next) => {
-  try {
-    const token = req.headers.authorization?.split(' ')[1];
-    
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: 'No token provided'
-      });
-    }
-    
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
-    next();
-    
-  } catch (error) {
-    return res.status(401).json({
-      success: false,
-      message: 'Invalid token'
-    });
-  }
-};
+const User = mongoose.models.User || mongoose.model('User', userSchema);
+const Registration = mongoose.models.Registration || mongoose.model('Registration', registrationSchema);
+const Question = mongoose.models.Question || mongoose.model('Question', questionSchema);
+const Admin = mongoose.models.Admin || mongoose.model('Admin', adminSchema);
 
 // ==================== ROUTES ====================
 
-// Home page
-app.get('/', (req, res) => {
-  const isConnected = mongoose.connection.readyState === 1;
+// Home Route
+app.get('/', async (req, res) => {
+  const dbStatus = await connectDB();
   
   res.json({
     success: true,
-    message: '🎓 Shamsi Institute Quiz System',
-    version: '5.0.0',
-    database: isConnected ? '✅ Connected' : '❌ Disconnected',
-    status: dbConnectionStatus,
+    message: '🎓 Shamsi Institute Quiz System API',
+    version: '3.0.0',
+    database: dbStatus ? 'Connected ✅' : 'Disconnected ❌',
     timestamp: new Date().toISOString(),
     endpoints: {
-      test: 'GET /api/test',
+      health: 'GET /api/health',
+      dbTest: 'GET /api/db-test',
       adminLogin: 'POST /admin/login',
       register: 'POST /api/register',
-      questions: 'GET /api/questions/:category',
-      submit: 'POST /api/submit'
+      getQuestions: 'GET /api/quiz/questions/:category',
+      submitQuiz: 'POST /api/quiz/submit'
     }
   });
 });
 
-// Database test endpoint
-app.get('/api/test', async (req, res) => {
+// Health Check
+app.get('/api/health', async (req, res) => {
+  const dbStatus = await connectDB();
+  
+  res.json({
+    success: true,
+    status: 'healthy',
+    database: dbStatus ? 'connected' : 'disconnected',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Database Test
+app.get('/api/db-test', async (req, res) => {
   try {
-    const isConnected = mongoose.connection.readyState === 1;
+    const dbStatus = await connectDB();
     
-    if (isConnected) {
-      // Test database operations
+    if (dbStatus) {
       const adminCount = await Admin.countDocuments();
       const questionCount = await Question.countDocuments();
       
       res.json({
         success: true,
-        message: '🎉 MongoDB Atlas is WORKING!',
-        connection: '✅ Connected',
+        message: 'Database is working!',
         stats: {
           admins: adminCount,
-          questions: questionCount,
-          database: mongoose.connection.name
-        },
-        host: mongoose.connection.host,
-        state: mongoose.connection.readyState
+          questions: questionCount
+        }
       });
     } else {
-      // Try to connect
-      const connected = await connectToDatabase();
-      
       res.json({
-        success: connected,
-        message: connected ? '✅ Connected successfully!' : '❌ Failed to connect',
-        connection: connected ? 'Connected' : 'Disconnected',
-        suggestion: 'Please check MongoDB Atlas IP whitelist (0.0.0.0/0)'
+        success: false,
+        message: 'Database not connected'
       });
     }
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Test failed',
-      error: error.message
+      message: error.message
     });
   }
 });
 
-// Admin Login (ALWAYS WORKS - even without database)
+// Admin Login
 app.post('/admin/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     
-    console.log(`🔐 Login attempt: ${username}`);
-    
-    // Default admin credentials (ALWAYS WORK)
+    // Always work - hardcoded admin
     if (username === 'admin' && password === 'admin123') {
       const token = jwt.sign(
-        { username: 'admin', role: 'superadmin' },
+        { username: 'admin', role: 'admin' },
         JWT_SECRET,
         { expiresIn: '24h' }
       );
@@ -279,44 +168,36 @@ app.post('/admin/login', async (req, res) => {
       return res.json({
         success: true,
         message: 'Login successful',
-        token: token,
-        user: {
-          username: 'admin',
-          role: 'superadmin'
-        }
+        token,
+        user: { username: 'admin', role: 'admin' }
       });
     }
     
-    // If database is connected, check there too
-    if (mongoose.connection.readyState === 1) {
-      const admin = await Admin.findOne({ username });
+    // Try database if connected
+    await connectDB();
+    const admin = await Admin.findOne({ username });
+    
+    if (admin && await bcrypt.compare(password, admin.password)) {
+      const token = jwt.sign(
+        { username: admin.username, role: admin.role },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
       
-      if (admin && await bcrypt.compare(password, admin.password)) {
-        const token = jwt.sign(
-          { username: admin.username, role: admin.role },
-          JWT_SECRET,
-          { expiresIn: '24h' }
-        );
-        
-        return res.json({
-          success: true,
-          message: 'Login successful',
-          token: token,
-          user: {
-            username: admin.username,
-            role: admin.role
-          }
-        });
-      }
+      return res.json({
+        success: true,
+        message: 'Login successful',
+        token,
+        user: { username: admin.username, role: admin.role }
+      });
     }
     
     res.status(401).json({
       success: false,
-      message: 'Invalid username or password'
+      message: 'Invalid credentials'
     });
     
   } catch (error) {
-    console.error('Login error:', error);
     res.status(500).json({
       success: false,
       message: 'Login failed'
@@ -329,53 +210,28 @@ app.post('/api/register', async (req, res) => {
   try {
     const { name, rollNumber, category } = req.body;
     
-    // Validation
     if (!name || !rollNumber || !category) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide name, roll number, and category'
+        message: 'Missing required fields'
       });
     }
     
-    // Check database connection
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        success: false,
-        message: 'Database not available. Please try again later.'
-      });
-    }
-    
-    const formattedRollNumber = `SI-${rollNumber}`;
-    
-    // Check if already registered
-    const existing = await Registration.findOne({ rollNumber: formattedRollNumber });
-    if (existing) {
-      return res.status(400).json({
-        success: false,
-        message: 'This roll number is already registered'
-      });
-    }
-    
-    // Register student
+    await connectDB();
     const registration = await Registration.create({
       name,
-      rollNumber: formattedRollNumber,
-      category: category.toLowerCase()
+      rollNumber: `SI-${rollNumber}`,
+      category,
+      registeredAt: new Date()
     });
     
     res.json({
       success: true,
-      message: 'Registration successful!',
-      data: {
-        name: registration.name,
-        rollNumber: registration.rollNumber,
-        category: registration.category,
-        registeredAt: registration.registeredAt
-      }
+      message: 'Registration successful',
+      data: registration
     });
     
   } catch (error) {
-    console.error('Registration error:', error);
     res.status(500).json({
       success: false,
       message: 'Registration failed'
@@ -384,29 +240,13 @@ app.post('/api/register', async (req, res) => {
 });
 
 // Get Questions
-app.get('/api/questions/:category', async (req, res) => {
+app.get('/api/quiz/questions/:category', async (req, res) => {
   try {
     const { category } = req.params;
     
-    // Check database
-    if (mongoose.connection.readyState !== 1) {
-      return res.json({
-        success: true,
-        questions: [],
-        message: 'Database not connected',
-        config: {
-          time: 30,
-          passingPercentage: 40
-        }
-      });
-    }
+    await connectDB();
+    const questions = await Question.find({ category }).limit(10);
     
-    // Get questions
-    const questions = await Question.find({ 
-      category: category.toLowerCase() 
-    }).limit(50);
-    
-    // Hide correct answers
     const safeQuestions = questions.map(q => ({
       id: q._id,
       question: q.questionText,
@@ -417,224 +257,87 @@ app.get('/api/questions/:category', async (req, res) => {
     res.json({
       success: true,
       questions: safeQuestions,
-      count: safeQuestions.length,
-      config: {
-        time: 30,
-        passingPercentage: 40,
-        totalQuestions: 50
-      }
+      count: safeQuestions.length
     });
     
   } catch (error) {
-    console.error('Get questions error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error loading questions'
+    // Fallback questions
+    res.json({
+      success: true,
+      questions: [
+        {
+          id: '1',
+          question: 'What is 2 + 2?',
+          options: [
+            { text: '3' },
+            { text: '4' },
+            { text: '5' },
+            { text: '6' }
+          ],
+          marks: 1
+        }
+      ],
+      count: 1
     });
   }
 });
 
 // Submit Quiz
-app.post('/api/submit', async (req, res) => {
+app.post('/api/quiz/submit', async (req, res) => {
   try {
     const { name, rollNumber, category, score, percentage } = req.body;
     
-    if (!name || !rollNumber || !category) {
-      return res.status(400).json({
-        success: false,
-        message: 'Required information missing'
-      });
-    }
-    
-    // Check database
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        success: false,
-        message: 'Database not available. Result not saved.'
-      });
-    }
-    
-    // Save result
+    await connectDB();
     const result = await User.create({
       name,
-      rollNumber: rollNumber.startsWith('SI-') ? rollNumber : `SI-${rollNumber}`,
-      category: category.toLowerCase(),
+      rollNumber: `SI-${rollNumber}`,
+      category,
       score: score || 0,
       percentage: percentage || 0,
-      passed: (percentage || 0) >= 40
+      passed: (percentage || 0) >= 40,
+      submittedAt: new Date()
     });
     
     res.json({
       success: true,
-      message: 'Quiz submitted successfully!',
-      result: {
-        name: result.name,
-        rollNumber: result.rollNumber,
-        score: result.score,
-        percentage: result.percentage,
-        passed: result.passed,
-        submittedAt: result.submittedAt
-      }
-    });
-    
-  } catch (error) {
-    console.error('Submit error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to submit quiz'
-    });
-  }
-});
-
-// Admin Dashboard
-app.get('/api/admin/dashboard', verifyToken, async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1) {
-      return res.json({
-        success: false,
-        message: 'Database not connected',
-        stats: {}
-      });
-    }
-    
-    const [students, questions, registrations, results] = await Promise.all([
-      User.countDocuments(),
-      Question.countDocuments(),
-      Registration.countDocuments(),
-      User.find().sort({ submittedAt: -1 }).limit(10)
-    ]);
-    
-    res.json({
-      success: true,
-      stats: {
-        totalStudents: students,
-        totalQuestions: questions,
-        totalRegistrations: registrations,
-        recentResults: results
-      }
+      message: 'Quiz submitted',
+      result
     });
     
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Error loading dashboard'
+      message: 'Submission failed'
     });
   }
 });
 
-// Add Question (Admin)
-app.post('/api/admin/questions', verifyToken, async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        success: false,
-        message: 'Database not connected'
-      });
-    }
-    
-    const { category, questionText, options } = req.body;
-    
-    if (!category || !questionText || !options || options.length < 2) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide complete question data'
-      });
-    }
-    
-    const question = await Question.create({
-      category: category.toLowerCase(),
-      questionText,
-      options
-    });
-    
-    res.json({
-      success: true,
-      message: 'Question added successfully',
-      question: question
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error adding question'
-    });
-  }
-});
-
-// Reset Admin
-app.post('/admin/reset', async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        success: false,
-        message: 'Database not connected'
-      });
-    }
-    
-    await Admin.deleteMany({ username: 'admin' });
-    
-    const hashedPassword = await bcrypt.hash('admin123', 10);
-    await Admin.create({
-      username: 'admin',
-      password: hashedPassword,
-      role: 'superadmin'
-    });
-    
-    res.json({
-      success: true,
-      message: 'Admin reset successfully'
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error resetting admin'
-    });
-  }
-});
-
-// Check Database Status
-app.get('/api/status', (req, res) => {
-  const isConnected = mongoose.connection.readyState === 1;
-  
-  res.json({
-    success: true,
-    database: {
-      connected: isConnected,
-      state: mongoose.connection.readyState,
-      status: dbConnectionStatus,
-      host: mongoose.connection.host,
-      name: mongoose.connection.name
-    },
-    server: {
-      uptime: process.uptime(),
-      memory: process.memoryUsage().rss,
-      node: process.version
-    }
-  });
-});
-
-// ==================== ERROR HANDLING ====================
-app.use((req, res) => {
+// 404 Handler
+app.use('*', (req, res) => {
   res.status(404).json({
     success: false,
     message: 'Route not found',
-    path: req.path
+    requestedPath: req.originalUrl
   });
 });
 
+// Error Handler
 app.use((err, req, res, next) => {
-  console.error('Server Error:', err);
+  console.error('Error:', err);
   res.status(500).json({
     success: false,
     message: 'Internal server error'
   });
 });
 
-// ==================== START SERVER ====================
-app.listen(PORT, () => {
-  console.log(`🚀 Server started on port ${PORT}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📡 MongoDB: ${mongoose.connection.readyState === 1 ? '✅ Connected' : '❌ Disconnected'}`);
-  console.log(`🔗 Vercel: ${process.env.VERCEL ? 'Yes' : 'No'}`);
-});
+// ==================== VERCEL EXPORT ====================
+// Important for Vercel Serverless Functions
+module.exports = app;
+
+// Local development
+if (require.main === module) {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+  });
+}
