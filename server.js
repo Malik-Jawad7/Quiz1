@@ -17,15 +17,34 @@ console.log('📊 Environment:', process.env.NODE_ENV);
 console.log('📊 MONGODB_URI exists:', !!process.env.MONGODB_URI);
 console.log('📊 JWT_SECRET exists:', !!process.env.JWT_SECRET);
 
-// ==================== MIDDLEWARE ====================
+// ==================== CORS CONFIGURATION ====================
 app.use(cors({
   origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-  credentials: true
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+  credentials: true,
+  exposedHeaders: ['Content-Length', 'Authorization'],
+  maxAge: 86400,
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
 
 app.options('*', cors());
+
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Expose-Headers', 'Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  next();
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -41,38 +60,30 @@ const connectDB = async () => {
   try {
     console.log('🔗 Connecting to MongoDB...');
     
-    // Check if we're on Vercel
-    const isVercel = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
-    console.log('🌐 Platform:', isVercel ? 'Vercel' : 'Local');
-    
-    let connectionURI = MONGODB_URI;
-    
-    if (!connectionURI) {
+    if (!MONGODB_URI) {
       console.error('❌ MONGODB_URI not found in environment variables');
       console.log('⚠️ Running in offline mode');
       isConnected = false;
       return false;
     }
     
-    console.log('📊 Using MongoDB URI (first 60 chars):', connectionURI.substring(0, 60) + '...');
+    console.log('📊 Using MongoDB URI');
     
-    // Connection options optimized for Vercel
     const connectionOptions = {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 10000,
-      socketTimeoutMS: 30000,
-      maxPoolSize: 5,
+      serverSelectionTimeoutMS: 15000,
+      socketTimeoutMS: 45000,
+      maxPoolSize: 10,
       retryWrites: true,
       w: 'majority'
     };
     
-    await mongoose.connect(connectionURI, connectionOptions);
+    await mongoose.connect(MONGODB_URI, connectionOptions);
     
     isConnected = true;
-    console.log('✅ MongoDB Connected Successfully on Vercel!');
+    console.log('✅ MongoDB Connected Successfully!');
     
-    // Event listeners
     mongoose.connection.on('error', (err) => {
       console.error('❌ MongoDB error:', err.message);
       isConnected = false;
@@ -92,27 +103,8 @@ const connectDB = async () => {
     
   } catch (error) {
     console.error('❌ MongoDB Connection Failed:', error.message);
-    
-    // Try alternative connection for Vercel
-    if (process.env.NODE_ENV === 'production') {
-      console.log('🔄 Trying alternative Vercel connection...');
-      try {
-        const fallbackURI = 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/?retryWrites=true&w=majority';
-        await mongoose.connect(fallbackURI, {
-          useNewUrlParser: true,
-          useUnifiedTopology: true,
-          serverSelectionTimeoutMS: 15000
-        });
-        isConnected = true;
-        console.log('✅ Connected with fallback URI');
-        return true;
-      } catch (fallbackError) {
-        console.error('❌ Fallback also failed:', fallbackError.message);
-      }
-    }
-    
     isConnected = false;
-    console.log('⚠️ Running in offline mode - All features available');
+    console.log('⚠️ Running in offline mode');
     console.log('🔐 Admin login: admin / admin123');
     return false;
   }
@@ -165,7 +157,6 @@ const Result = mongoose.model('Result', resultSchema);
 const Config = mongoose.model('Config', configSchema);
 const Admin = mongoose.model('Admin', adminSchema);
 
-// Initialize default data
 const initializeDefaultData = async () => {
   if (!isConnected) {
     console.log('⚠️ Skipping default data - DB not connected');
@@ -175,7 +166,6 @@ const initializeDefaultData = async () => {
   try {
     console.log('📦 Initializing default data...');
     
-    // Check if admin exists
     const adminExists = await Admin.findOne({ username: 'admin' });
     if (!adminExists) {
       const hashedPassword = await bcrypt.hash('admin123', 10);
@@ -187,7 +177,6 @@ const initializeDefaultData = async () => {
       console.log('✅ Default admin created');
     }
 
-    // Check if config exists
     const configExists = await Config.findOne();
     if (!configExists) {
       await Config.create({
@@ -207,17 +196,15 @@ const initializeDefaultData = async () => {
 
 // ==================== ROUTES ====================
 
-// Root Route
 app.get('/', (req, res) => {
-  const isProd = process.env.NODE_ENV === 'production';
-  
   res.json({
     success: true,
     message: '🎓 Shamsi Institute Quiz System API - Vercel',
-    version: '3.0.0',
-    database: isProd ? 'Connected ✅' : (isConnected ? 'Connected ✅' : 'Disconnected ❌'),
+    version: '5.0.0',
+    database: isConnected ? 'Connected ✅' : 'Disconnected ❌',
     environment: process.env.NODE_ENV || 'development',
     timestamp: new Date().toISOString(),
+    cors: 'Enabled for all origins (*)',
     endpoints: {
       health: 'GET /api/health',
       admin_login: 'POST /admin/login',
@@ -225,72 +212,87 @@ app.get('/', (req, res) => {
       quiz_questions: 'GET /api/quiz/questions/:category',
       submit_quiz: 'POST /api/quiz/submit',
       config: 'GET /api/config',
-      categories: 'GET /api/categories'
+      categories: 'GET /api/categories',
+      test_cors: 'GET /api/test-cors'
     },
     note: '✅ System is fully operational',
     admin_login: 'admin / admin123'
   });
 });
 
-// Health Check
-app.get('/api/health', async (req, res) => {
-  try {
-    // For production, always return healthy
-    if (process.env.NODE_ENV === 'production') {
-      return res.json({
-        success: true,
-        status: 'healthy',
-        database: 'connected',
-        environment: 'production',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        node_version: process.version,
-        message: '✅ System operational on Vercel'
-      });
-    }
-    
-    // For development
-    if (!isConnected) {
-      await connectDB();
-    }
-    
-    res.json({
-      success: true,
-      status: 'healthy',
-      database: isConnected ? 'connected' : 'disconnected',
-      environment: process.env.NODE_ENV || 'development',
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      node_version: process.version
-    });
-  } catch (error) {
-    res.json({
-      success: true,
-      status: 'healthy',
-      database: 'connected',
-      message: '✅ System running',
-      timestamp: new Date().toISOString()
-    });
-  }
+app.get('/api/health', (req, res) => {
+  res.json({
+    success: true,
+    status: 'healthy',
+    database: isConnected ? 'connected' : 'disconnected',
+    environment: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    node_version: process.version,
+    cors: 'enabled',
+    origin: req.headers.origin || 'Unknown',
+    message: '✅ Backend is running on Vercel'
+  });
 });
 
-// Admin Login
+app.get('/api/test-cors', (req, res) => {
+  res.json({
+    success: true,
+    message: '✅ CORS test successful',
+    origin: req.headers.origin || 'Unknown',
+    timestamp: new Date().toISOString(),
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+    }
+  });
+});
+
+// GET route for /admin/login (for testing)
+app.get('/admin/login', (req, res) => {
+  res.json({
+    success: true,
+    message: '🔐 Admin Login Endpoint',
+    instructions: 'Use POST method to login',
+    post_endpoint: 'POST /admin/login',
+    example_body: {
+      username: 'admin',
+      password: 'admin123'
+    },
+    default_credentials: {
+      username: 'admin',
+      password: 'admin123'
+    },
+    test_login: `curl -X POST http://localhost:${PORT}/admin/login -H "Content-Type: application/json" -d '{"username":"admin","password":"admin123"}'`
+  });
+});
+
+// POST route for /admin/login (actual login)
 app.post('/admin/login', async (req, res) => {
+  console.log('🔐 Login attempt from:', req.headers.origin);
+  console.log('📝 Login data:', { username: req.body.username });
+  
   try {
     const { username, password } = req.body;
     
-    console.log('🔐 Login attempt:', username);
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username and password are required'
+      });
+    }
     
-    // ALWAYS allow admin/admin123
     if (username === 'admin' && password === 'admin123') {
       const token = jwt.sign({ 
         username: 'admin',
-        role: 'admin'
+        role: 'admin',
+        source: 'vercel_fallback'
       }, JWT_SECRET, { expiresIn: '24h' });
       
       return res.json({
         success: true,
-        message: '✅ Login successful',
+        message: '✅ Login successful (Vercel)',
         token,
         user: { 
           username: 'admin',
@@ -299,16 +301,18 @@ app.post('/admin/login', async (req, res) => {
       });
     }
     
-    // Try database if connected
     if (isConnected) {
       try {
-        const admin = await Admin.findOne({ username });
+        const admin = await Admin.findOne({ username: username.trim() });
+        
         if (admin) {
           const isPasswordValid = await bcrypt.compare(password, admin.password);
+          
           if (isPasswordValid) {
             const token = jwt.sign({ 
               username: admin.username,
-              role: 'admin'
+              role: 'admin',
+              source: 'database'
             }, JWT_SECRET, { expiresIn: '24h' });
             
             return res.json({
@@ -329,20 +333,27 @@ app.post('/admin/login', async (req, res) => {
     
     return res.status(401).json({
       success: false,
-      message: '❌ Invalid credentials. Use: admin / admin123'
+      message: '❌ Invalid credentials. Use default: admin / admin123'
     });
     
   } catch (error) {
     console.error('❌ Login error:', error);
     
-    // Emergency fallback
     if (req.body.username === 'admin' && req.body.password === 'admin123') {
-      const token = jwt.sign({ username: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
+      const token = jwt.sign({ 
+        username: 'admin',
+        role: 'admin',
+        source: 'emergency'
+      }, JWT_SECRET, { expiresIn: '24h' });
+      
       return res.json({
         success: true,
-        message: '✅ Login successful (emergency)',
+        message: '✅ Login successful (emergency fallback)',
         token,
-        user: { username: 'admin' }
+        user: { 
+          username: 'admin',
+          role: 'admin'
+        }
       });
     }
     
@@ -353,12 +364,50 @@ app.post('/admin/login', async (req, res) => {
   }
 });
 
-// Get Config
+app.post('/admin/reset', async (req, res) => {
+  try {
+    console.log('🔄 Resetting admin credentials');
+    
+    if (isConnected) {
+      try {
+        const hashedPassword = await bcrypt.hash('admin123', 10);
+        
+        await Admin.findOneAndUpdate(
+          { username: 'admin' },
+          { 
+            username: 'admin',
+            password: hashedPassword,
+            createdAt: new Date()
+          },
+          { upsert: true, new: true }
+        );
+        
+        console.log('✅ Admin reset in database');
+      } catch (dbError) {
+        console.log('⚠️ Database reset failed:', dbError.message);
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: '✅ Admin credentials set to: admin / admin123'
+    });
+    
+  } catch (error) {
+    console.error('❌ Reset error:', error);
+    res.json({
+      success: true,
+      message: '✅ Admin reset complete (fallback)'
+    });
+  }
+});
+
 app.get('/api/config', async (req, res) => {
   try {
     if (isConnected) {
       try {
         let config = await Config.findOne();
+        
         if (!config) {
           config = await Config.create({
             quizTime: 30,
@@ -366,9 +415,14 @@ app.get('/api/config', async (req, res) => {
             totalQuestions: 50
           });
         }
-        return res.json({ success: true, config });
+        
+        return res.json({
+          success: true,
+          config,
+          source: 'database'
+        });
       } catch (dbError) {
-        console.log('⚠️ Config fetch failed:', dbError.message);
+        console.log('⚠️ Database config fetch failed:', dbError.message);
       }
     }
     
@@ -378,23 +432,24 @@ app.get('/api/config', async (req, res) => {
         quizTime: 30,
         passingPercentage: 40,
         totalQuestions: 50
-      }
+      },
+      source: 'fallback'
     });
     
   } catch (error) {
-    console.error('❌ Config error:', error);
+    console.error('❌ Get config error:', error);
     res.json({
       success: true,
       config: {
         quizTime: 30,
         passingPercentage: 40,
         totalQuestions: 50
-      }
+      },
+      source: 'error'
     });
   }
 });
 
-// Update Config
 app.put('/api/config', async (req, res) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
@@ -403,11 +458,13 @@ app.put('/api/config', async (req, res) => {
     }
     
     jwt.verify(token, JWT_SECRET);
+    
     const { quizTime, passingPercentage, totalQuestions } = req.body;
     
     if (isConnected) {
       try {
         let config = await Config.findOne();
+        
         if (!config) {
           config = await Config.create({
             quizTime,
@@ -421,33 +478,44 @@ app.put('/api/config', async (req, res) => {
           config.updatedAt = new Date();
           await config.save();
         }
-        return res.json({ success: true, message: '✅ Config updated', config });
+        
+        return res.json({
+          success: true,
+          message: '✅ Configuration updated in database',
+          config,
+          source: 'database'
+        });
       } catch (dbError) {
-        console.log('⚠️ Config update failed:', dbError.message);
+        console.log('⚠️ Database config update failed:', dbError.message);
       }
     }
     
     res.json({
       success: true,
-      message: '✅ Config updated (offline)',
-      config: { quizTime, passingPercentage, totalQuestions }
+      message: '✅ Configuration updated (fallback mode)',
+      config: {
+        quizTime,
+        passingPercentage,
+        totalQuestions
+      },
+      source: 'fallback'
     });
     
   } catch (error) {
     console.error('❌ Update config error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to update'
+      message: 'Failed to update configuration'
     });
   }
 });
 
-// Get Categories
 app.get('/api/categories', async (req, res) => {
   try {
     if (isConnected) {
       try {
         const categories = await Question.distinct('category');
+        
         if (categories.length > 0) {
           const categoryData = categories.map(cat => ({
             value: cat,
@@ -455,10 +523,15 @@ app.get('/api/categories', async (req, res) => {
             description: `${cat.toUpperCase()} Technology`,
             available: true
           }));
-          return res.json({ success: true, categories: categoryData });
+          
+          return res.json({
+            success: true,
+            categories: categoryData,
+            source: 'database'
+          });
         }
       } catch (dbError) {
-        console.log('⚠️ Categories fetch failed:', dbError.message);
+        console.log('⚠️ Database categories fetch failed:', dbError.message);
       }
     }
     
@@ -472,23 +545,24 @@ app.get('/api/categories', async (req, res) => {
         { value: 'node', label: 'Node.js', description: 'Node.js Backend', available: true },
         { value: 'python', label: 'Python', description: 'Python Programming', available: true },
         { value: 'java', label: 'Java', description: 'Java Programming', available: true }
-      ]
+      ],
+      source: 'default'
     });
     
   } catch (error) {
-    console.error('❌ Categories error:', error);
+    console.error('❌ Get categories error:', error);
     res.json({
       success: true,
       categories: [
-        { value: 'html', label: 'HTML', available: true },
-        { value: 'css', label: 'CSS', available: true },
-        { value: 'javascript', label: 'JavaScript', available: true }
-      ]
+        { value: 'html', label: 'HTML', description: 'HTML Web Development', available: true },
+        { value: 'css', label: 'CSS', description: 'CSS Styling', available: true },
+        { value: 'javascript', label: 'JavaScript', description: 'JavaScript Programming', available: true }
+      ],
+      source: 'error'
     });
   }
 });
 
-// Register User
 app.post('/api/register', async (req, res) => {
   try {
     const { name, rollNumber, category } = req.body;
@@ -496,7 +570,7 @@ app.post('/api/register', async (req, res) => {
     if (!name || !rollNumber || !category) {
       return res.status(400).json({
         success: false,
-        message: 'All fields required'
+        message: 'All fields are required'
       });
     }
     
@@ -504,7 +578,7 @@ app.post('/api/register', async (req, res) => {
     
     res.json({
       success: true,
-      message: '✅ Registration successful!',
+      message: 'Registration successful! You can now start the quiz.',
       user: {
         name: name.trim(),
         rollNumber: formattedRollNumber,
@@ -521,10 +595,10 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// Get Quiz Questions
 app.get('/api/quiz/questions/:category', async (req, res) => {
   try {
     const { category } = req.params;
+    
     console.log('📚 Fetching questions for:', category);
     
     if (isConnected) {
@@ -538,6 +612,7 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
         
         if (questions.length > 0) {
           console.log(`✅ Found ${questions.length} questions`);
+          
           return res.json({
             success: true,
             questions,
@@ -545,15 +620,15 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
               quizTime: config?.quizTime || 30,
               passingPercentage: config?.passingPercentage || 40,
               totalQuestions: limit
-            }
+            },
+            source: 'database'
           });
         }
       } catch (dbError) {
-        console.log('⚠️ Questions fetch failed:', dbError.message);
+        console.log('⚠️ Database questions fetch failed:', dbError.message);
       }
     }
     
-    // Sample questions
     const sampleQuestions = [
       {
         _id: 'sample1',
@@ -579,6 +654,18 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
         marks: 1,
         difficulty: 'easy',
         category: 'html'
+      },
+      {
+        _id: 'sample3',
+        questionText: 'What is CSS used for?',
+        options: [
+          { text: 'Styling web pages', isCorrect: true },
+          { text: 'Creating web page structure', isCorrect: false },
+          { text: 'Server-side programming', isCorrect: false }
+        ],
+        marks: 1,
+        difficulty: 'easy',
+        category: 'css'
       }
     ];
     
@@ -589,11 +676,13 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
         quizTime: 30,
         passingPercentage: 40,
         totalQuestions: 50
-      }
+      },
+      source: 'sample'
     });
     
   } catch (error) {
-    console.error('❌ Questions error:', error);
+    console.error('❌ Get quiz questions error:', error);
+    
     res.json({
       success: true,
       questions: [],
@@ -601,12 +690,12 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
         quizTime: 30,
         passingPercentage: 40,
         totalQuestions: 50
-      }
+      },
+      source: 'error'
     });
   }
 });
 
-// Submit Quiz
 app.post('/api/quiz/submit', async (req, res) => {
   try {
     const {
@@ -629,7 +718,7 @@ app.post('/api/quiz/submit', async (req, res) => {
     
     if (isConnected) {
       try {
-        await Result.create({
+        const result = await Result.create({
           rollNumber,
           name,
           category,
@@ -644,15 +733,16 @@ app.post('/api/quiz/submit', async (req, res) => {
           isAutoSubmitted: isAutoSubmitted || false,
           submittedAt: new Date()
         });
-        console.log('✅ Result saved to DB');
+        
+        console.log('✅ Result saved to database:', result._id);
       } catch (dbError) {
-        console.error('❌ DB save error:', dbError.message);
+        console.error('❌ Database save error:', dbError.message);
       }
     }
     
     res.json({
       success: true,
-      message: '✅ Quiz submitted successfully!',
+      message: 'Quiz submitted successfully!',
       result: {
         rollNumber,
         name,
@@ -671,39 +761,48 @@ app.post('/api/quiz/submit', async (req, res) => {
     
   } catch (error) {
     console.error('❌ Submit quiz error:', error);
+    
     res.json({
       success: true,
-      message: '✅ Quiz submitted',
+      message: 'Quiz submitted (local mode)',
       result: req.body
     });
   }
 });
 
-// Admin Protected Routes Middleware
 const authenticateAdmin = (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
+    
     if (!token) {
-      return res.status(401).json({ success: false, message: 'Access token required' });
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Access token required' 
+      });
     }
+    
     jwt.verify(token, JWT_SECRET);
     next();
   } catch (error) {
-    res.status(401).json({ success: false, message: 'Invalid or expired token' });
+    res.status(401).json({ 
+      success: false, 
+      message: 'Invalid or expired token' 
+    });
   }
 };
 
-// Dashboard Stats
 app.get('/api/admin/dashboard', authenticateAdmin, async (req, res) => {
   try {
     if (isConnected) {
       try {
         const totalStudents = await Result.countDocuments();
         const totalQuestions = await Question.countDocuments();
+        
         const results = await Result.find();
         const averageScore = results.length > 0 
           ? results.reduce((sum, r) => sum + (r.percentage || 0), 0) / results.length 
           : 0;
+        
         const passedCount = results.filter(r => r.passed).length;
         const passRate = results.length > 0 ? (passedCount / results.length) * 100 : 0;
         
@@ -722,10 +821,11 @@ app.get('/api/admin/dashboard', authenticateAdmin, async (req, res) => {
             averageScore: parseFloat(averageScore.toFixed(2)),
             passRate: parseFloat(passRate.toFixed(2)),
             todayAttempts
-          }
+          },
+          source: 'database'
         });
       } catch (dbError) {
-        console.log('⚠️ Stats fetch failed:', dbError.message);
+        console.log('⚠️ Database stats fetch failed:', dbError.message);
       }
     }
     
@@ -738,7 +838,8 @@ app.get('/api/admin/dashboard', authenticateAdmin, async (req, res) => {
         averageScore: 0,
         passRate: 0,
         todayAttempts: 0
-      }
+      },
+      source: 'fallback'
     });
     
   } catch (error) {
@@ -752,17 +853,18 @@ app.get('/api/admin/dashboard', authenticateAdmin, async (req, res) => {
         averageScore: 0,
         passRate: 0,
         todayAttempts: 0
-      }
+      },
+      source: 'error'
     });
   }
 });
 
-// Get All Questions (Admin)
 app.get('/api/admin/questions', authenticateAdmin, async (req, res) => {
   try {
     if (isConnected) {
       try {
         const { category = 'all', search = '', page = 1, limit = 100 } = req.query;
+        
         let query = {};
         if (category !== 'all') query.category = category;
         if (search) {
@@ -784,10 +886,11 @@ app.get('/api/admin/questions', authenticateAdmin, async (req, res) => {
           questions,
           total,
           page: parseInt(page),
-          pages: Math.ceil(total / limit)
+          pages: Math.ceil(total / limit),
+          source: 'database'
         });
       } catch (dbError) {
-        console.log('⚠️ Questions fetch failed:', dbError.message);
+        console.log('⚠️ Database questions fetch failed:', dbError.message);
       }
     }
     
@@ -796,7 +899,8 @@ app.get('/api/admin/questions', authenticateAdmin, async (req, res) => {
       questions: [],
       total: 0,
       page: 1,
-      pages: 0
+      pages: 0,
+      source: 'fallback'
     });
     
   } catch (error) {
@@ -808,7 +912,6 @@ app.get('/api/admin/questions', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Add Question (Admin)
 app.post('/api/admin/questions', authenticateAdmin, async (req, res) => {
   try {
     const { category, questionText, options, marks, difficulty } = req.body;
@@ -845,17 +948,18 @@ app.post('/api/admin/questions', authenticateAdmin, async (req, res) => {
         
         return res.json({
           success: true,
-          message: '✅ Question added successfully!',
-          question
+          message: '✅ Question added successfully to database!',
+          question,
+          source: 'database'
         });
       } catch (dbError) {
-        console.log('⚠️ Question add failed:', dbError.message);
+        console.log('⚠️ Database question add failed:', dbError.message);
       }
     }
     
     res.json({
       success: true,
-      message: '✅ Question added (offline)',
+      message: '✅ Question added (offline mode)',
       question: {
         _id: 'temp_' + Date.now(),
         category,
@@ -864,7 +968,8 @@ app.post('/api/admin/questions', authenticateAdmin, async (req, res) => {
         marks: marks || 1,
         difficulty: difficulty || 'medium',
         createdAt: new Date()
-      }
+      },
+      source: 'fallback'
     });
     
   } catch (error) {
@@ -876,26 +981,28 @@ app.post('/api/admin/questions', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Get Results (Admin)
 app.get('/api/admin/results', authenticateAdmin, async (req, res) => {
   try {
     if (isConnected) {
       try {
         const results = await Result.find().sort({ submittedAt: -1 });
+        
         return res.json({
           success: true,
           results,
-          count: results.length
+          count: results.length,
+          source: 'database'
         });
       } catch (dbError) {
-        console.log('⚠️ Results fetch failed:', dbError.message);
+        console.log('⚠️ Database results fetch failed:', dbError.message);
       }
     }
     
     res.json({
       success: true,
       results: [],
-      count: 0
+      count: 0,
+      source: 'fallback'
     });
     
   } catch (error) {
@@ -907,25 +1014,41 @@ app.get('/api/admin/results', authenticateAdmin, async (req, res) => {
   }
 });
 
-// 404 Handler
 app.use('*', (req, res) => {
   res.status(404).json({
     success: false,
     message: 'Route not found',
-    requestedPath: req.originalUrl
+    requestedPath: req.originalUrl,
+    availableRoutes: [
+      'GET /',
+      'GET /api/health',
+      'GET /api/test-cors',
+      'GET /admin/login (info)',
+      'POST /admin/login (actual login)',
+      'POST /admin/reset',
+      'GET /api/config',
+      'GET /api/categories',
+      'POST /api/register',
+      'GET /api/quiz/questions/:category',
+      'POST /api/quiz/submit',
+      'GET /api/admin/dashboard',
+      'GET /api/admin/questions',
+      'POST /api/admin/questions',
+      'GET /api/admin/results'
+    ]
   });
 });
 
-// Error Handler
 app.use((err, req, res, next) => {
   console.error('🔥 Server Error:', err);
+  
   res.status(500).json({
     success: false,
-    message: 'Internal server error'
+    message: 'Internal server error',
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
 
-// ==================== INITIALIZE ====================
 connectDB().then(connected => {
   if (connected) {
     console.log('🎉 Server initialized with MongoDB');
@@ -937,13 +1060,16 @@ connectDB().then(connected => {
   }
 });
 
-// For Vercel
 module.exports = app;
 
-// For local development
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🌐 Open: http://localhost:${PORT}`);
+    console.log(`🔐 Admin login info: GET http://localhost:${PORT}/admin/login`);
+    console.log(`🔐 Admin login: POST http://localhost:${PORT}/admin/login`);
+    console.log(`📋 Body: {"username":"admin","password":"admin123"}`);
+    console.log(`🏥 Health check: http://localhost:${PORT}/api/health`);
+    console.log(`🌐 CORS test: http://localhost:${PORT}/api/test-cors`);
   });
 }
