@@ -3,21 +3,20 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-require('dotenv').config();
 
 const app = express();
 
-// ==================== CONFIGURATION ====================
+// Configuration
 const JWT_SECRET = process.env.JWT_SECRET || 'shamsi_secret_key_2024_vercel_deploy';
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/shamsi_quiz_system?retryWrites=true&w=majority&appName=Cluster0';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
 const PORT = process.env.PORT || 5000;
 
 console.log('🚀 Shamsi Institute Quiz System Backend');
-console.log('📊 MongoDB URI:', MONGODB_URI ? 'Present' : 'Not found');
-console.log('🔐 JWT Secret:', JWT_SECRET ? 'Present' : 'Not found');
-console.log('🌍 NODE_ENV:', process.env.NODE_ENV);
+console.log('📊 Environment:', process.env.NODE_ENV);
+console.log('🔗 MongoDB URI:', MONGODB_URI ? 'Present' : 'Missing');
+console.log('🔐 JWT Secret:', JWT_SECRET ? 'Present' : 'Missing');
 
-// ==================== CORS ====================
+// CORS
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
@@ -30,51 +29,86 @@ app.options('*', cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ==================== MONGODB CONNECTION ====================
+// MongoDB Connection
 let isMongoDBConnected = false;
 
 const connectToMongoDB = async () => {
   try {
-    console.log('🔄 Connecting to MongoDB...');
+    console.log('🔄 Attempting MongoDB connection...');
     
-    // Use the exact MongoDB URI from your .env
-    const mongoURI = 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
-    console.log('🔗 Using MongoDB URI:', mongoURI.substring(0, 50) + '...');
+    // Clean up the URI
+    const mongoURI = MONGODB_URI.trim();
+    
+    // Test if we can connect
+    console.log('🔗 Testing MongoDB connection...');
     
     const connectionOptions = {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 30000,
+      serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
-      connectTimeoutMS: 30000,
+      connectTimeoutMS: 10000,
       retryWrites: true,
-      w: 'majority'
+      w: 'majority',
+      ssl: true,
+      tls: true
     };
 
+    console.log('⚙️ Connection options:', {
+      serverSelectionTimeoutMS: connectionOptions.serverSelectionTimeoutMS,
+      socketTimeoutMS: connectionOptions.socketTimeoutMS,
+      connectTimeoutMS: connectionOptions.connectTimeoutMS
+    });
+
+    // Remove strict query warning
     mongoose.set('strictQuery', false);
 
+    // Connect to MongoDB
     await mongoose.connect(mongoURI, connectionOptions);
     
     isMongoDBConnected = true;
     
     console.log('✅✅✅ MONGODB CONNECTED SUCCESSFULLY! ✅✅✅');
-    console.log('📊 Database:', mongoose.connection.db?.databaseName || 'quiz_system');
+    console.log('📊 Database:', mongoose.connection.db?.databaseName || 'Unknown');
     console.log('🏠 Host:', mongoose.connection.host);
     console.log('📈 Ready State:', mongoose.connection.readyState);
+    console.log('📅 Connection time:', new Date().toISOString());
+    
+    // Test the connection by pinging the database
+    await mongoose.connection.db.admin().ping();
+    console.log('✅ Database ping successful');
     
     return true;
     
   } catch (error) {
-    console.error('❌ MongoDB connection failed:', error.message);
-    console.error('🔍 Error details:', error);
+    console.error('❌ MONGODB CONNECTION FAILED:', error.message);
+    console.error('🔍 Error details:', {
+      name: error.name,
+      code: error.code,
+      codeName: error.codeName,
+      errorLabels: error.errorLabels
+    });
+    
+    // More detailed error information
+    if (error.message.includes('ENOTFOUND')) {
+      console.error('🔍 DNS lookup failed - check your MongoDB URI');
+    } else if (error.message.includes('ETIMEDOUT')) {
+      console.error('🔍 Connection timeout - check your network or MongoDB Atlas IP whitelist');
+    } else if (error.message.includes('auth failed')) {
+      console.error('🔍 Authentication failed - check username/password');
+    } else if (error.message.includes('bad auth')) {
+      console.error('🔍 Authentication failed - invalid credentials');
+    } else if (error.message.includes('network')) {
+      console.error('🔍 Network error - check your internet connection');
+    }
     
     isMongoDBConnected = false;
-    console.log('⚠️ Running in memory mode (questions and results will not persist)');
+    console.log('⚠️ Running in memory mode');
     return false;
   }
 };
 
-// ==================== DATABASE MODELS ====================
+// Database Models
 const questionSchema = new mongoose.Schema({
   category: {
     type: String,
@@ -216,10 +250,10 @@ const Result = mongoose.model('Result', resultSchema);
 const Config = mongoose.model('Config', configSchema);
 const Admin = mongoose.model('Admin', adminSchema);
 
-// ==================== INITIALIZE DATABASE ====================
+// Initialize Database
 const initializeDatabase = async () => {
   if (!isMongoDBConnected) {
-    console.log('⚠️ Skipping database initialization (MongoDB not connected)');
+    console.log('⚠️ Skipping database initialization');
     return;
   }
 
@@ -234,7 +268,7 @@ const initializeDatabase = async () => {
         username: 'admin',
         password: hashedPassword
       });
-      console.log('✅ Default admin created (admin/admin123)');
+      console.log('✅ Default admin created');
     }
     
     // Create default config
@@ -248,14 +282,23 @@ const initializeDatabase = async () => {
       console.log('✅ Default config created');
     }
     
-    console.log('✅ Database initialization complete');
+    console.log('✅ Database initialized');
     
   } catch (error) {
     console.error('❌ Database initialization error:', error.message);
   }
 };
 
-// ==================== ROUTES ====================
+// Helper Functions
+const getDatabaseStatus = () => {
+  return {
+    connected: isMongoDBConnected,
+    mode: isMongoDBConnected ? 'mongodb' : 'in-memory',
+    timestamp: new Date().toISOString()
+  };
+};
+
+// Routes
 
 // 1. Root Route
 app.get('/', (req, res) => {
@@ -264,10 +307,7 @@ app.get('/', (req, res) => {
     message: '🎓 Shamsi Institute Quiz System API',
     version: '1.0.0',
     status: 'operational',
-    database: {
-      connected: isMongoDBConnected,
-      mode: isMongoDBConnected ? 'mongodb' : 'in-memory'
-    },
+    database: getDatabaseStatus(),
     timestamp: new Date().toISOString()
   });
 });
@@ -277,12 +317,48 @@ app.get('/api/health', (req, res) => {
   res.json({
     success: true,
     status: 'healthy',
-    database: isMongoDBConnected,
+    database: getDatabaseStatus(),
     timestamp: new Date().toISOString()
   });
 });
 
-// 3. Admin Login
+// 3. Test MongoDB Connection
+app.get('/api/test-mongodb', async (req, res) => {
+  try {
+    if (isMongoDBConnected) {
+      // Test with a simple query
+      const count = await Question.countDocuments();
+      const config = await Config.findOne();
+      
+      return res.json({
+        success: true,
+        message: '✅ MongoDB is connected and working',
+        database: getDatabaseStatus(),
+        stats: {
+          questions: count,
+          config: config || 'No config found'
+        }
+      });
+    }
+    
+    res.json({
+      success: false,
+      message: '❌ MongoDB is not connected',
+      database: getDatabaseStatus(),
+      error: 'Check your MongoDB connection string and IP whitelist'
+    });
+    
+  } catch (error) {
+    res.json({
+      success: false,
+      message: '❌ MongoDB test failed',
+      error: error.message,
+      database: getDatabaseStatus()
+    });
+  }
+});
+
+// 4. Admin Login
 app.post('/admin/login', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -294,10 +370,10 @@ app.post('/admin/login', async (req, res) => {
       });
     }
     
-    // Always allow default admin
+    // Always allow default admin (even without MongoDB)
     if (username === 'admin' && password === 'admin123') {
       const token = jwt.sign(
-        { username: 'admin', role: 'admin' },
+        { username: 'admin', role: 'admin', source: 'default' },
         JWT_SECRET,
         { expiresIn: '24h' }
       );
@@ -309,11 +385,12 @@ app.post('/admin/login', async (req, res) => {
         user: {
           username: 'admin',
           role: 'admin'
-        }
+        },
+        database: getDatabaseStatus()
       });
     }
     
-    // Try MongoDB authentication
+    // Try MongoDB authentication if connected
     if (isMongoDBConnected) {
       try {
         const admin = await Admin.findOne({ username: username.toLowerCase() });
@@ -323,7 +400,7 @@ app.post('/admin/login', async (req, res) => {
           
           if (isPasswordValid) {
             const token = jwt.sign(
-              { username: admin.username, role: 'admin' },
+              { username: admin.username, role: 'admin', source: 'mongodb' },
               JWT_SECRET,
               { expiresIn: '24h' }
             );
@@ -335,7 +412,8 @@ app.post('/admin/login', async (req, res) => {
               user: {
                 username: admin.username,
                 role: 'admin'
-              }
+              },
+              database: getDatabaseStatus()
             });
           }
         }
@@ -346,19 +424,21 @@ app.post('/admin/login', async (req, res) => {
     
     res.status(401).json({
       success: false,
-      message: 'Invalid credentials. Use: admin / admin123'
+      message: 'Invalid credentials. Use: admin / admin123',
+      database: getDatabaseStatus()
     });
     
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error during login'
+      message: 'Server error during login',
+      database: getDatabaseStatus()
     });
   }
 });
 
-// 4. Get Config
+// 5. Get Config
 app.get('/api/config', async (req, res) => {
   try {
     let config;
@@ -379,7 +459,7 @@ app.get('/api/config', async (req, res) => {
     res.json({
       success: true,
       config,
-      database: isMongoDBConnected
+      database: getDatabaseStatus()
     });
     
   } catch (error) {
@@ -391,12 +471,12 @@ app.get('/api/config', async (req, res) => {
         passingPercentage: 40,
         totalQuestions: 50
       },
-      database: false
+      database: getDatabaseStatus()
     });
   }
 });
 
-// 5. Update Config
+// 6. Update Config
 app.put('/api/config', async (req, res) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
@@ -432,19 +512,20 @@ app.put('/api/config', async (req, res) => {
     res.json({
       success: true,
       message: '✅ Configuration updated',
-      database: isMongoDBConnected
+      database: getDatabaseStatus()
     });
     
   } catch (error) {
     console.error('Update config error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to update configuration'
+      message: 'Failed to update configuration',
+      database: getDatabaseStatus()
     });
   }
 });
 
-// 6. Get Categories
+// 7. Get Categories
 app.get('/api/categories', async (req, res) => {
   try {
     let categories = [];
@@ -471,7 +552,7 @@ app.get('/api/categories', async (req, res) => {
     res.json({
       success: true,
       categories: categoryData,
-      database: isMongoDBConnected
+      database: getDatabaseStatus()
     });
     
   } catch (error) {
@@ -483,12 +564,12 @@ app.get('/api/categories', async (req, res) => {
         { value: 'css', label: 'CSS', description: 'CSS Styling', available: true },
         { value: 'javascript', label: 'JavaScript', description: 'JavaScript Programming', available: true }
       ],
-      database: false
+      database: getDatabaseStatus()
     });
   }
 });
 
-// 7. Register Student
+// 8. Register Student
 app.post('/api/register', async (req, res) => {
   try {
     const { name, rollNumber, category } = req.body;
@@ -509,22 +590,25 @@ app.post('/api/register', async (req, res) => {
         name: name.trim(),
         rollNumber: formattedRollNumber,
         category: category.toLowerCase()
-      }
+      },
+      database: getDatabaseStatus()
     });
     
   } catch (error) {
     console.error('Registration error:', error);
     res.status(500).json({
       success: false,
-      message: 'Registration failed'
+      message: 'Registration failed',
+      database: getDatabaseStatus()
     });
   }
 });
 
-// 8. Get Quiz Questions
+// 9. Get Quiz Questions
 app.get('/api/quiz/questions/:category', async (req, res) => {
   try {
     const { category } = req.params;
+    const formattedCategory = category.toLowerCase();
     
     let questions = [];
     let config = {
@@ -541,7 +625,7 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
         }
         
         questions = await Question.find({ 
-          category: category.toLowerCase() 
+          category: formattedCategory 
         }).limit(config.totalQuestions || 50);
       } catch (error) {
         console.error('Questions error:', error.message);
@@ -553,7 +637,7 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
       questions = [
         {
           _id: 'sample_1',
-          category: category.toLowerCase(),
+          category: formattedCategory,
           questionText: `What is ${category.toUpperCase()} used for?`,
           options: [
             { text: 'Web Development', isCorrect: true },
@@ -580,7 +664,7 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
         passingPercentage: config.passingPercentage || 40,
         totalQuestions: limit
       },
-      database: isMongoDBConnected
+      database: getDatabaseStatus()
     });
     
   } catch (error) {
@@ -593,12 +677,12 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
         passingPercentage: 40,
         totalQuestions: 10
       },
-      database: false
+      database: getDatabaseStatus()
     });
   }
 });
 
-// 9. Submit Quiz
+// 10. Submit Quiz
 app.post('/api/quiz/submit', async (req, res) => {
   try {
     const {
@@ -634,6 +718,7 @@ app.post('/api/quiz/submit', async (req, res) => {
       try {
         await Result.create(resultData);
         savedToDB = true;
+        console.log('✅ Result saved to MongoDB');
       } catch (error) {
         console.error('Save result error:', error.message);
       }
@@ -644,7 +729,7 @@ app.post('/api/quiz/submit', async (req, res) => {
       message: '✅ Quiz submitted successfully!',
       result: resultData,
       savedToDB,
-      database: isMongoDBConnected
+      database: getDatabaseStatus()
     });
     
   } catch (error) {
@@ -652,13 +737,12 @@ app.post('/api/quiz/submit', async (req, res) => {
     res.json({
       success: true,
       message: 'Quiz submitted',
-      database: false
+      database: getDatabaseStatus()
     });
   }
 });
 
-// ==================== ADMIN ROUTES ====================
-
+// Admin Routes (Authentication Middleware)
 const authenticateAdmin = (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
@@ -690,7 +774,7 @@ const authenticateAdmin = (req, res, next) => {
   }
 };
 
-// 10. Admin Dashboard
+// 11. Admin Dashboard
 app.get('/api/admin/dashboard', authenticateAdmin, async (req, res) => {
   try {
     let stats = {
@@ -733,19 +817,20 @@ app.get('/api/admin/dashboard', authenticateAdmin, async (req, res) => {
     res.json({
       success: true,
       stats,
-      database: isMongoDBConnected
+      database: getDatabaseStatus()
     });
     
   } catch (error) {
     console.error('Dashboard error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching dashboard data'
+      message: 'Error fetching dashboard data',
+      database: getDatabaseStatus()
     });
   }
 });
 
-// 11. Get All Questions (Admin)
+// 12. Get All Questions (Admin)
 app.get('/api/admin/questions', authenticateAdmin, async (req, res) => {
   try {
     let questions = [];
@@ -757,19 +842,20 @@ app.get('/api/admin/questions', authenticateAdmin, async (req, res) => {
     res.json({
       success: true,
       questions,
-      database: isMongoDBConnected
+      database: getDatabaseStatus()
     });
     
   } catch (error) {
     console.error('Get questions error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error'
+      message: 'Server error',
+      database: getDatabaseStatus()
     });
   }
 });
 
-// 12. Add Question (Admin)
+// 13. Add Question (Admin)
 app.post('/api/admin/questions', authenticateAdmin, async (req, res) => {
   try {
     const { category, questionText, options, marks = 1, difficulty = 'medium' } = req.body;
@@ -810,19 +896,20 @@ app.post('/api/admin/questions', authenticateAdmin, async (req, res) => {
       success: true,
       message: '✅ Question added successfully!',
       question: savedQuestion || questionData,
-      database: isMongoDBConnected
+      database: getDatabaseStatus()
     });
     
   } catch (error) {
     console.error('Add question error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error'
+      message: 'Server error',
+      database: getDatabaseStatus()
     });
   }
 });
 
-// 13. Get Results (Admin)
+// 14. Get Results (Admin)
 app.get('/api/admin/results', authenticateAdmin, async (req, res) => {
   try {
     let results = [];
@@ -834,19 +921,20 @@ app.get('/api/admin/results', authenticateAdmin, async (req, res) => {
     res.json({
       success: true,
       results,
-      database: isMongoDBConnected
+      database: getDatabaseStatus()
     });
     
   } catch (error) {
     console.error('Get results error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error'
+      message: 'Server error',
+      database: getDatabaseStatus()
     });
   }
 });
 
-// 14. Delete Question
+// 15. Delete Question
 app.delete('/api/admin/questions/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -858,19 +946,20 @@ app.delete('/api/admin/questions/:id', authenticateAdmin, async (req, res) => {
     res.json({
       success: true,
       message: 'Question deleted successfully',
-      database: isMongoDBConnected
+      database: getDatabaseStatus()
     });
     
   } catch (error) {
     console.error('Delete question error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error'
+      message: 'Server error',
+      database: getDatabaseStatus()
     });
   }
 });
 
-// 15. Delete Result
+// 16. Delete Result
 app.delete('/api/admin/results/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -882,19 +971,20 @@ app.delete('/api/admin/results/:id', authenticateAdmin, async (req, res) => {
     res.json({
       success: true,
       message: 'Result deleted successfully',
-      database: isMongoDBConnected
+      database: getDatabaseStatus()
     });
     
   } catch (error) {
     console.error('Delete result error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error'
+      message: 'Server error',
+      database: getDatabaseStatus()
     });
   }
 });
 
-// 16. Delete All Results
+// 17. Delete All Results
 app.delete('/api/admin/results', authenticateAdmin, async (req, res) => {
   try {
     if (isMongoDBConnected) {
@@ -904,19 +994,20 @@ app.delete('/api/admin/results', authenticateAdmin, async (req, res) => {
     res.json({
       success: true,
       message: 'All results deleted successfully',
-      database: isMongoDBConnected
+      database: getDatabaseStatus()
     });
     
   } catch (error) {
     console.error('Delete all results error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error'
+      message: 'Server error',
+      database: getDatabaseStatus()
     });
   }
 });
 
-// 17. Reset Admin
+// 18. Reset Admin
 app.post('/admin/reset', async (req, res) => {
   try {
     if (isMongoDBConnected) {
@@ -932,54 +1023,92 @@ app.post('/admin/reset', async (req, res) => {
     res.json({
       success: true,
       message: 'Admin reset successfully',
-      database: isMongoDBConnected
+      database: getDatabaseStatus()
     });
     
   } catch (error) {
     console.error('Reset admin error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error resetting admin'
+      message: 'Error resetting admin',
+      database: getDatabaseStatus()
     });
   }
+});
+
+// 19. Database Info
+app.get('/api/db-info', (req, res) => {
+  res.json({
+    success: true,
+    database: getDatabaseStatus(),
+    mongoose: {
+      readyState: mongoose.connection?.readyState || 0,
+      states: ['disconnected', 'connected', 'connecting', 'disconnecting']
+    },
+    environment: {
+      NODE_ENV: process.env.NODE_ENV,
+      PORT: process.env.PORT,
+      MONGODB_URI: MONGODB_URI ? 'Present (hidden for security)' : 'Missing',
+      JWT_SECRET: JWT_SECRET ? 'Present' : 'Missing'
+    }
+  });
 });
 
 // 404 Handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: 'Route not found'
+    message: 'Route not found',
+    database: getDatabaseStatus()
   });
 });
 
 // Error Handler
 app.use((err, req, res, next) => {
-  console.error('Server error:', err);
+  console.error('🚨 Server error:', err);
   res.status(500).json({
     success: false,
-    message: 'Internal server error'
+    message: 'Internal server error',
+    error: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong',
+    database: getDatabaseStatus()
   });
 });
 
-// ==================== START SERVER ====================
+// Start Server
 const startServer = async () => {
   try {
+    console.log('🚀 Starting server...');
+    
+    // Connect to MongoDB
     await connectToMongoDB();
+    
+    // Initialize database
     await initializeDatabase();
     
+    // Start listening
     app.listen(PORT, () => {
-      console.log(`\n🚀 Server running on port ${PORT}`);
+      console.log(`\n✅ Server running on port ${PORT}`);
       console.log(`🌐 http://localhost:${PORT}`);
       console.log(`🔐 Admin login: admin / admin123`);
-      console.log(`✅ MongoDB: ${isMongoDBConnected ? 'CONNECTED 🎉' : 'DISCONNECTED'}`);
+      console.log(`📊 MongoDB: ${isMongoDBConnected ? 'CONNECTED 🎉' : 'DISCONNECTED'}`);
+      console.log(`📅 Server started: ${new Date().toISOString()}`);
+      
+      if (!isMongoDBConnected) {
+        console.log('\n⚠️  IMPORTANT: MongoDB is not connected!');
+        console.log('🔧 Please check:');
+        console.log('   1. MongoDB Atlas IP whitelist (add 0.0.0.0/0)');
+        console.log('   2. MongoDB connection string in Vercel environment variables');
+        console.log('   3. MongoDB username/password');
+      }
     });
     
   } catch (error) {
-    console.error('Failed to start server:', error);
+    console.error('❌ Failed to start server:', error);
     process.exit(1);
   }
 };
 
+// Start the server
 startServer();
 
 module.exports = app;
