@@ -15,6 +15,7 @@ const PORT = process.env.PORT || 5000;
 console.log('🚀 Shamsi Institute Quiz System Backend');
 console.log('📊 MongoDB URI:', MONGODB_URI ? 'Present' : 'Not found');
 console.log('🔐 JWT Secret:', JWT_SECRET ? 'Present' : 'Not found');
+console.log('🌍 NODE_ENV:', process.env.NODE_ENV);
 
 // ==================== CORS ====================
 app.use(cors({
@@ -31,71 +32,41 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ==================== MONGODB CONNECTION ====================
 let isMongoDBConnected = false;
-let mongooseConnection = null;
 
 const connectToMongoDB = async () => {
   try {
     console.log('🔄 Connecting to MongoDB...');
-    console.log('🔗 URI:', MONGODB_URI.substring(0, 50) + '...');
     
-    // Connection options
+    // Use the exact MongoDB URI from your .env
+    const mongoURI = 'mongodb+srv://khalid:khalid123@cluster0.e6gmkpo.mongodb.net/quiz_system?retryWrites=true&w=majority';
+    console.log('🔗 Using MongoDB URI:', mongoURI.substring(0, 50) + '...');
+    
     const connectionOptions = {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 30000, // 30 seconds
-      socketTimeoutMS: 45000, // 45 seconds
-      connectTimeoutMS: 30000, // 30 seconds
+      serverSelectionTimeoutMS: 30000,
+      socketTimeoutMS: 45000,
+      connectTimeoutMS: 30000,
       retryWrites: true,
-      w: 'majority',
-      maxPoolSize: 10,
-      minPoolSize: 1,
-      serverApi: {
-        version: '1',
-        strict: true,
-        deprecationErrors: true
-      }
+      w: 'majority'
     };
 
-    // Remove strict query warning
     mongoose.set('strictQuery', false);
 
-    // Connect to MongoDB
-    await mongoose.connect(MONGODB_URI, connectionOptions);
+    await mongoose.connect(mongoURI, connectionOptions);
     
     isMongoDBConnected = true;
-    mongooseConnection = mongoose.connection;
     
     console.log('✅✅✅ MONGODB CONNECTED SUCCESSFULLY! ✅✅✅');
-    console.log('📊 Database:', mongoose.connection.db?.databaseName || 'Unknown');
+    console.log('📊 Database:', mongoose.connection.db?.databaseName || 'quiz_system');
     console.log('🏠 Host:', mongoose.connection.host);
     console.log('📈 Ready State:', mongoose.connection.readyState);
-    console.log('📅 Connection time:', new Date().toISOString());
-    
-    // Connection event listeners
-    mongoose.connection.on('error', (err) => {
-      console.error('❌ MongoDB connection error:', err);
-      isMongoDBConnected = false;
-    });
-    
-    mongoose.connection.on('disconnected', () => {
-      console.log('⚠️ MongoDB disconnected');
-      isMongoDBConnected = false;
-    });
-    
-    mongoose.connection.on('reconnected', () => {
-      console.log('🔄 MongoDB reconnected');
-      isMongoDBConnected = true;
-    });
     
     return true;
     
   } catch (error) {
     console.error('❌ MongoDB connection failed:', error.message);
-    console.error('🔍 Error details:', {
-      name: error.name,
-      code: error.code,
-      codeName: error.codeName
-    });
+    console.error('🔍 Error details:', error);
     
     isMongoDBConnected = false;
     console.log('⚠️ Running in memory mode (questions and results will not persist)');
@@ -104,7 +75,6 @@ const connectToMongoDB = async () => {
 };
 
 // ==================== DATABASE MODELS ====================
-// Question Schema
 const questionSchema = new mongoose.Schema({
   category: {
     type: String,
@@ -142,14 +112,9 @@ const questionSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now
   }
 });
 
-// Result Schema
 const resultSchema = new mongoose.Schema({
   rollNumber: {
     type: String,
@@ -169,35 +134,27 @@ const resultSchema = new mongoose.Schema({
   },
   score: {
     type: Number,
-    default: 0,
-    min: 0
+    default: 0
   },
   percentage: {
     type: Number,
-    default: 0,
-    min: 0,
-    max: 100
+    default: 0
   },
   totalQuestions: {
     type: Number,
-    default: 0,
-    min: 0
+    default: 0
   },
   correctAnswers: {
     type: Number,
-    default: 0,
-    min: 0
+    default: 0
   },
   attempted: {
     type: Number,
-    default: 0,
-    min: 0
+    default: 0
   },
   passingPercentage: {
     type: Number,
-    default: 40,
-    min: 0,
-    max: 100
+    default: 40
   },
   passed: {
     type: Boolean,
@@ -215,29 +172,20 @@ const resultSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   }
-}, {
-  timestamps: true
 });
 
-// Config Schema
 const configSchema = new mongoose.Schema({
   quizTime: {
     type: Number,
-    default: 30,
-    min: 1,
-    max: 180
+    default: 30
   },
   passingPercentage: {
     type: Number,
-    default: 40,
-    min: 0,
-    max: 100
+    default: 40
   },
   totalQuestions: {
     type: Number,
-    default: 50,
-    min: 1,
-    max: 100
+    default: 50
   },
   updatedAt: {
     type: Date,
@@ -245,7 +193,6 @@ const configSchema = new mongoose.Schema({
   }
 });
 
-// Admin Schema
 const adminSchema = new mongoose.Schema({
   username: {
     type: String,
@@ -261,13 +208,9 @@ const adminSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now
-  },
-  lastLogin: {
-    type: Date
   }
 });
 
-// Create Models
 const Question = mongoose.model('Question', questionSchema);
 const Result = mongoose.model('Result', resultSchema);
 const Config = mongoose.model('Config', configSchema);
@@ -292,8 +235,6 @@ const initializeDatabase = async () => {
         password: hashedPassword
       });
       console.log('✅ Default admin created (admin/admin123)');
-    } else {
-      console.log('✅ Admin already exists');
     }
     
     // Create default config
@@ -305,29 +246,13 @@ const initializeDatabase = async () => {
         totalQuestions: 50
       });
       console.log('✅ Default config created');
-    } else {
-      console.log('✅ Config already exists');
     }
-    
-    // Create indexes
-    await Question.createIndexes();
-    await Result.createIndexes();
-    await Admin.createIndexes();
     
     console.log('✅ Database initialization complete');
     
   } catch (error) {
     console.error('❌ Database initialization error:', error.message);
   }
-};
-
-// ==================== HELPER FUNCTIONS ====================
-const getDatabaseStatus = () => {
-  return {
-    connected: isMongoDBConnected,
-    mode: isMongoDBConnected ? 'mongodb' : 'in-memory',
-    timestamp: new Date().toISOString()
-  };
 };
 
 // ==================== ROUTES ====================
@@ -337,21 +262,13 @@ app.get('/', (req, res) => {
   res.json({
     success: true,
     message: '🎓 Shamsi Institute Quiz System API',
-    version: '3.0.0',
+    version: '1.0.0',
     status: 'operational',
-    database: getDatabaseStatus(),
-    endpoints: {
-      health: 'GET /api/health',
-      admin_login: 'POST /admin/login',
-      config: 'GET /api/config',
-      categories: 'GET /api/categories',
-      register: 'POST /api/register',
-      quiz_questions: 'GET /api/quiz/questions/:category',
-      submit_quiz: 'POST /api/quiz/submit',
-      admin_dashboard: 'GET /api/admin/dashboard',
-      admin_questions: 'GET /api/admin/questions',
-      admin_results: 'GET /api/admin/results'
-    }
+    database: {
+      connected: isMongoDBConnected,
+      mode: isMongoDBConnected ? 'mongodb' : 'in-memory'
+    },
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -360,10 +277,8 @@ app.get('/api/health', (req, res) => {
   res.json({
     success: true,
     status: 'healthy',
-    timestamp: new Date().toISOString(),
-    database: getDatabaseStatus(),
-    uptime: process.uptime(),
-    memory: process.memoryUsage()
+    database: isMongoDBConnected,
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -379,10 +294,10 @@ app.post('/admin/login', async (req, res) => {
       });
     }
     
-    // Always allow default admin (even if MongoDB is not connected)
+    // Always allow default admin
     if (username === 'admin' && password === 'admin123') {
       const token = jwt.sign(
-        { username: 'admin', role: 'admin', source: 'default' },
+        { username: 'admin', role: 'admin' },
         JWT_SECRET,
         { expiresIn: '24h' }
       );
@@ -394,26 +309,21 @@ app.post('/admin/login', async (req, res) => {
         user: {
           username: 'admin',
           role: 'admin'
-        },
-        database: getDatabaseStatus()
+        }
       });
     }
     
-    // Try MongoDB authentication if connected
+    // Try MongoDB authentication
     if (isMongoDBConnected) {
       try {
-        const admin = await Admin.findOne({ username: username.trim().toLowerCase() });
+        const admin = await Admin.findOne({ username: username.toLowerCase() });
         
         if (admin) {
           const isPasswordValid = await bcrypt.compare(password, admin.password);
           
           if (isPasswordValid) {
-            // Update last login
-            admin.lastLogin = new Date();
-            await admin.save();
-            
             const token = jwt.sign(
-              { username: admin.username, role: 'admin', source: 'mongodb' },
+              { username: admin.username, role: 'admin' },
               JWT_SECRET,
               { expiresIn: '24h' }
             );
@@ -425,13 +335,12 @@ app.post('/admin/login', async (req, res) => {
               user: {
                 username: admin.username,
                 role: 'admin'
-              },
-              database: getDatabaseStatus()
+              }
             });
           }
         }
-      } catch (dbError) {
-        console.error('MongoDB auth error:', dbError.message);
+      } catch (error) {
+        console.error('MongoDB auth error:', error.message);
       }
     }
     
@@ -456,38 +365,21 @@ app.get('/api/config', async (req, res) => {
     
     if (isMongoDBConnected) {
       config = await Config.findOne();
-      if (!config) {
-        config = await Config.create({
-          quizTime: 30,
-          passingPercentage: 40,
-          totalQuestions: 50
-        });
-      }
-      
-      return res.json({
-        success: true,
-        config: {
-          quizTime: config.quizTime,
-          passingPercentage: config.passingPercentage,
-          totalQuestions: config.totalQuestions,
-          updatedAt: config.updatedAt
-        },
-        source: 'mongodb',
-        database: getDatabaseStatus()
-      });
     }
     
-    // Fallback config
-    res.json({
-      success: true,
-      config: {
+    if (!config) {
+      config = {
         quizTime: 30,
         passingPercentage: 40,
         totalQuestions: 50,
         updatedAt: new Date()
-      },
-      source: 'memory',
-      database: getDatabaseStatus()
+      };
+    }
+    
+    res.json({
+      success: true,
+      config,
+      database: isMongoDBConnected
     });
     
   } catch (error) {
@@ -499,8 +391,7 @@ app.get('/api/config', async (req, res) => {
         passingPercentage: 40,
         totalQuestions: 50
       },
-      source: 'fallback',
-      database: getDatabaseStatus()
+      database: false
     });
   }
 });
@@ -508,34 +399,17 @@ app.get('/api/config', async (req, res) => {
 // 5. Update Config
 app.put('/api/config', async (req, res) => {
   try {
-    // Check authorization
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
       return res.status(401).json({
         success: false,
         message: 'Authorization token required'
       });
     }
     
-    const token = authHeader.split(' ')[1];
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: 'Token format is: Bearer <token>'
-      });
-    }
-    
-    // Verify token
     jwt.verify(token, JWT_SECRET);
     
     const { quizTime, passingPercentage, totalQuestions } = req.body;
-    
-    if (!quizTime || !passingPercentage || !totalQuestions) {
-      return res.status(400).json({
-        success: false,
-        message: 'All fields are required'
-      });
-    }
     
     if (isMongoDBConnected) {
       let config = await Config.findOne();
@@ -553,44 +427,16 @@ app.put('/api/config', async (req, res) => {
         config.updatedAt = new Date();
         await config.save();
       }
-      
-      return res.json({
-        success: true,
-        message: '✅ Configuration updated successfully',
-        config: {
-          quizTime: config.quizTime,
-          passingPercentage: config.passingPercentage,
-          totalQuestions: config.totalQuestions,
-          updatedAt: config.updatedAt
-        },
-        source: 'mongodb',
-        database: getDatabaseStatus()
-      });
     }
     
     res.json({
       success: true,
-      message: '✅ Configuration updated (memory mode)',
-      config: {
-        quizTime,
-        passingPercentage,
-        totalQuestions,
-        updatedAt: new Date()
-      },
-      source: 'memory',
-      database: getDatabaseStatus()
+      message: '✅ Configuration updated',
+      database: isMongoDBConnected
     });
     
   } catch (error) {
     console.error('Update config error:', error);
-    
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid or expired token'
-      });
-    }
-    
     res.status(500).json({
       success: false,
       message: 'Failed to update configuration'
@@ -602,115 +448,55 @@ app.put('/api/config', async (req, res) => {
 app.get('/api/categories', async (req, res) => {
   try {
     let categories = [];
-    let source = 'memory';
     
     if (isMongoDBConnected) {
       try {
-        const distinctCategories = await Question.distinct('category');
-        if (distinctCategories && distinctCategories.length > 0) {
-          categories = distinctCategories;
-          source = 'mongodb';
-        }
-      } catch (dbError) {
-        console.error('MongoDB categories error:', dbError.message);
+        categories = await Question.distinct('category');
+      } catch (error) {
+        console.error('Categories error:', error.message);
       }
     }
     
-    // If no categories from MongoDB, use default
     if (categories.length === 0) {
-      categories = ['html', 'css', 'javascript', 'react', 'node', 'python', 'java', 'mongodb'];
-      source = 'default';
+      categories = ['html', 'css', 'javascript', 'react', 'node', 'python', 'java'];
     }
     
     const categoryData = categories.map(cat => ({
       value: cat,
       label: cat.charAt(0).toUpperCase() + cat.slice(1),
       description: `${cat.charAt(0).toUpperCase() + cat.slice(1)} Technology`,
-      available: true,
-      type: getCategoryType(cat)
+      available: true
     }));
     
     res.json({
       success: true,
       categories: categoryData,
-      count: categories.length,
-      source,
-      database: getDatabaseStatus()
+      database: isMongoDBConnected
     });
     
   } catch (error) {
     console.error('Get categories error:', error);
-    
     res.json({
       success: true,
       categories: [
-        { value: 'html', label: 'HTML', description: 'HTML Web Development', available: true, type: 'frontend' },
-        { value: 'css', label: 'CSS', description: 'CSS Styling', available: true, type: 'frontend' },
-        { value: 'javascript', label: 'JavaScript', description: 'JavaScript Programming', available: true, type: 'frontend' },
-        { value: 'react', label: 'React.js', description: 'React Framework', available: true, type: 'frontend' },
-        { value: 'node', label: 'Node.js', description: 'Node.js Backend', available: true, type: 'backend' },
-        { value: 'python', label: 'Python', description: 'Python Programming', available: true, type: 'backend' },
-        { value: 'java', label: 'Java', description: 'Java Programming', available: true, type: 'backend' }
+        { value: 'html', label: 'HTML', description: 'HTML Web Development', available: true },
+        { value: 'css', label: 'CSS', description: 'CSS Styling', available: true },
+        { value: 'javascript', label: 'JavaScript', description: 'JavaScript Programming', available: true }
       ],
-      source: 'fallback',
-      database: getDatabaseStatus()
+      database: false
     });
   }
 });
-
-// Helper function for category type
-function getCategoryType(category) {
-  const types = {
-    'html': 'frontend',
-    'css': 'frontend',
-    'javascript': 'frontend',
-    'react': 'frontend',
-    'vue': 'frontend',
-    'angular': 'frontend',
-    'node': 'backend',
-    'express': 'backend',
-    'python': 'backend',
-    'java': 'backend',
-    'php': 'backend',
-    'mongodb': 'database',
-    'mysql': 'database',
-    'postgresql': 'database'
-  };
-  
-  return types[category] || 'general';
-}
 
 // 7. Register Student
 app.post('/api/register', async (req, res) => {
   try {
     const { name, rollNumber, category } = req.body;
     
-    // Validation
     if (!name || !rollNumber || !category) {
       return res.status(400).json({
         success: false,
-        message: 'All fields are required: name, rollNumber, category'
-      });
-    }
-    
-    if (name.length < 3) {
-      return res.status(400).json({
-        success: false,
-        message: 'Name must be at least 3 characters long'
-      });
-    }
-    
-    if (!/^\d+$/.test(rollNumber)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Roll number must contain only numbers'
-      });
-    }
-    
-    if (rollNumber.length < 3 || rollNumber.length > 10) {
-      return res.status(400).json({
-        success: false,
-        message: 'Roll number should be between 3 and 10 digits'
+        message: 'All fields are required'
       });
     }
     
@@ -718,21 +504,19 @@ app.post('/api/register', async (req, res) => {
     
     res.json({
       success: true,
-      message: '✅ Registration successful! You can now start the quiz.',
+      message: '✅ Registration successful!',
       user: {
         name: name.trim(),
         rollNumber: formattedRollNumber,
-        category: category.toLowerCase(),
-        registeredAt: new Date().toISOString()
-      },
-      database: getDatabaseStatus()
+        category: category.toLowerCase()
+      }
     });
     
   } catch (error) {
     console.error('Registration error:', error);
     res.status(500).json({
       success: false,
-      message: 'Registration failed due to server error'
+      message: 'Registration failed'
     });
   }
 });
@@ -741,12 +525,8 @@ app.post('/api/register', async (req, res) => {
 app.get('/api/quiz/questions/:category', async (req, res) => {
   try {
     const { category } = req.params;
-    const formattedCategory = category.toLowerCase();
-    
-    console.log(`📚 Fetching questions for category: ${formattedCategory}`);
     
     let questions = [];
-    let source = 'memory';
     let config = {
       quizTime: 30,
       passingPercentage: 40,
@@ -755,48 +535,42 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
     
     if (isMongoDBConnected) {
       try {
-        // Get config
         const dbConfig = await Config.findOne();
         if (dbConfig) {
           config = dbConfig;
         }
         
-        // Get questions
-        const dbQuestions = await Question.find({ 
-          category: formattedCategory 
+        questions = await Question.find({ 
+          category: category.toLowerCase() 
         }).limit(config.totalQuestions || 50);
-        
-        if (dbQuestions.length > 0) {
-          questions = dbQuestions;
-          source = 'mongodb';
-          console.log(`✅ Found ${questions.length} questions in MongoDB`);
-        }
-      } catch (dbError) {
-        console.error('MongoDB questions error:', dbError.message);
+      } catch (error) {
+        console.error('Questions error:', error.message);
       }
     }
     
-    // If no questions found, provide sample
+    // If no questions, provide samples
     if (questions.length === 0) {
-      questions = getSampleQuestions(formattedCategory);
-      source = 'sample';
-      console.log(`✅ Using ${questions.length} sample questions`);
+      questions = [
+        {
+          _id: 'sample_1',
+          category: category.toLowerCase(),
+          questionText: `What is ${category.toUpperCase()} used for?`,
+          options: [
+            { text: 'Web Development', isCorrect: true },
+            { text: 'Cooking', isCorrect: false },
+            { text: 'Medicine', isCorrect: false },
+            { text: 'Agriculture', isCorrect: false }
+          ],
+          marks: 1,
+          difficulty: 'easy'
+        }
+      ];
     }
     
-    // Shuffle questions
+    // Shuffle and limit
     const shuffledQuestions = [...questions].sort(() => Math.random() - 0.5);
-    
-    // Limit questions
     const limit = Math.min(config.totalQuestions || 50, shuffledQuestions.length);
     const finalQuestions = shuffledQuestions.slice(0, limit);
-    
-    // Validate questions have correct options
-    finalQuestions.forEach((q, index) => {
-      const hasCorrect = q.options?.some(opt => opt.isCorrect === true);
-      if (!hasCorrect) {
-        console.warn(`⚠️ Question ${index + 1} has no correct option marked`);
-      }
-    });
     
     res.json({
       success: true,
@@ -806,104 +580,23 @@ app.get('/api/quiz/questions/:category', async (req, res) => {
         passingPercentage: config.passingPercentage || 40,
         totalQuestions: limit
       },
-      count: finalQuestions.length,
-      source,
-      database: getDatabaseStatus()
+      database: isMongoDBConnected
     });
     
   } catch (error) {
     console.error('Get quiz questions error:', error);
-    
     res.json({
       success: true,
-      questions: getSampleQuestions('general'),
+      questions: [],
       config: {
         quizTime: 30,
         passingPercentage: 40,
         totalQuestions: 10
       },
-      source: 'error_fallback',
-      database: getDatabaseStatus()
+      database: false
     });
   }
 });
-
-// Helper function for sample questions
-function getSampleQuestions(category) {
-  const samples = {
-    html: [
-      {
-        _id: 'html_sample_1',
-        category: 'html',
-        questionText: 'What does HTML stand for?',
-        options: [
-          { text: 'Hyper Text Markup Language', isCorrect: true },
-          { text: 'Home Tool Markup Language', isCorrect: false },
-          { text: 'Hyperlinks and Text Markup Language', isCorrect: false }
-        ],
-        marks: 1,
-        difficulty: 'easy'
-      },
-      {
-        _id: 'html_sample_2',
-        category: 'html',
-        questionText: 'Which HTML tag is used for the largest heading?',
-        options: [
-          { text: '<h1>', isCorrect: true },
-          { text: '<h6>', isCorrect: false },
-          { text: '<heading>', isCorrect: false }
-        ],
-        marks: 1,
-        difficulty: 'easy'
-      }
-    ],
-    css: [
-      {
-        _id: 'css_sample_1',
-        category: 'css',
-        questionText: 'What does CSS stand for?',
-        options: [
-          { text: 'Cascading Style Sheets', isCorrect: true },
-          { text: 'Colorful Style Sheets', isCorrect: false },
-          { text: 'Computer Style Sheets', isCorrect: false }
-        ],
-        marks: 1,
-        difficulty: 'easy'
-      }
-    ],
-    javascript: [
-      {
-        _id: 'js_sample_1',
-        category: 'javascript',
-        questionText: 'Inside which HTML element do we put JavaScript?',
-        options: [
-          { text: '<script>', isCorrect: true },
-          { text: '<javascript>', isCorrect: false },
-          { text: '<js>', isCorrect: false }
-        ],
-        marks: 1,
-        difficulty: 'easy'
-      }
-    ],
-    general: [
-      {
-        _id: 'general_sample_1',
-        category: 'general',
-        questionText: 'Welcome to the quiz! Select the correct option.',
-        options: [
-          { text: 'This is the correct answer', isCorrect: true },
-          { text: 'Wrong answer 1', isCorrect: false },
-          { text: 'Wrong answer 2', isCorrect: false },
-          { text: 'Wrong answer 3', isCorrect: false }
-        ],
-        marks: 1,
-        difficulty: 'easy'
-      }
-    ]
-  };
-  
-  return samples[category] || samples.general;
-}
 
 // 9. Submit Quiz
 app.post('/api/quiz/submit', async (req, res) => {
@@ -916,79 +609,56 @@ app.post('/api/quiz/submit', async (req, res) => {
       totalQuestions,
       correctAnswers,
       attempted,
-      passingPercentage = 40,
-      cheatingDetected = false,
-      isAutoSubmitted = false
+      passingPercentage = 40
     } = req.body;
     
-    console.log('📤 Quiz submission received:', { name, rollNumber, correctAnswers });
-    
-    // Calculate results
-    const finalScore = correctAnswers || score || 0;
-    const percentage = totalQuestions > 0 ? (finalScore / totalQuestions) * 100 : 0;
+    const percentage = totalQuestions > 0 ? (correctAnswers / totalQuestions) * 100 : 0;
     const passed = percentage >= passingPercentage;
     
-    // Create result object
     const resultData = {
       rollNumber: rollNumber.startsWith('SI-') ? rollNumber : `SI-${rollNumber}`,
       name: name.trim(),
       category: category.toLowerCase(),
-      score: finalScore,
+      score: score || 0,
       percentage: parseFloat(percentage.toFixed(2)),
       totalQuestions,
-      correctAnswers: finalScore,
-      attempted: attempted || finalScore,
+      correctAnswers: correctAnswers || score || 0,
+      attempted,
       passingPercentage,
-      passed,
-      cheatingDetected,
-      isAutoSubmitted
+      passed
     };
     
     let savedToDB = false;
-    let savedResult = null;
     
-    // Save to MongoDB if connected
     if (isMongoDBConnected) {
       try {
-        savedResult = await Result.create(resultData);
+        await Result.create(resultData);
         savedToDB = true;
-        console.log('✅ Result saved to MongoDB with ID:', savedResult._id);
-      } catch (dbError) {
-        console.error('MongoDB save error:', dbError.message);
+      } catch (error) {
+        console.error('Save result error:', error.message);
       }
     }
     
     res.json({
       success: true,
       message: '✅ Quiz submitted successfully!',
-      result: {
-        ...resultData,
-        _id: savedResult?._id || 'memory_' + Date.now(),
-        submittedAt: new Date(),
-        savedToDB,
-        database: getDatabaseStatus()
-      }
+      result: resultData,
+      savedToDB,
+      database: isMongoDBConnected
     });
     
   } catch (error) {
     console.error('Submit quiz error:', error);
-    
     res.json({
       success: true,
-      message: 'Quiz submitted (memory mode)',
-      result: {
-        ...req.body,
-        submittedAt: new Date().toISOString(),
-        savedToDB: false,
-        database: getDatabaseStatus()
-      }
+      message: 'Quiz submitted',
+      database: false
     });
   }
 });
 
 // ==================== ADMIN ROUTES ====================
 
-// Authentication middleware
 const authenticateAdmin = (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
@@ -996,7 +666,7 @@ const authenticateAdmin = (req, res, next) => {
     if (!authHeader) {
       return res.status(401).json({ 
         success: false, 
-        message: 'Access token required. Please login first.' 
+        message: 'Access token required' 
       });
     }
     
@@ -1009,26 +679,13 @@ const authenticateAdmin = (req, res, next) => {
       });
     }
     
-    // Verify token
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
-    
-    console.log(`🔐 Authenticated admin: ${decoded.username}`);
-    
+    jwt.verify(token, JWT_SECRET);
     next();
+    
   } catch (error) {
-    console.error('Authentication error:', error.message);
-    
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Token has expired. Please login again.' 
-      });
-    }
-    
     res.status(401).json({ 
       success: false, 
-      message: 'Invalid token. Please login again.' 
+      message: 'Invalid token' 
     });
   }
 };
@@ -1036,8 +693,6 @@ const authenticateAdmin = (req, res, next) => {
 // 10. Admin Dashboard
 app.get('/api/admin/dashboard', authenticateAdmin, async (req, res) => {
   try {
-    console.log(`📊 Dashboard request from: ${req.user.username}`);
-    
     let stats = {
       totalStudents: 0,
       totalQuestions: 0,
@@ -1053,41 +708,32 @@ app.get('/api/admin/dashboard', authenticateAdmin, async (req, res) => {
         const totalQuestions = await Question.countDocuments();
         const results = await Result.find();
         
-        let averageScore = 0;
-        let passRate = 0;
-        
         if (results.length > 0) {
           const totalPercentage = results.reduce((sum, r) => sum + (r.percentage || 0), 0);
-          averageScore = totalPercentage / results.length;
+          stats.averageScore = totalPercentage / results.length;
           
           const passedCount = results.filter(r => r.passed).length;
-          passRate = (passedCount / results.length) * 100;
+          stats.passRate = (passedCount / results.length) * 100;
         }
+        
+        stats.totalStudents = totalStudents;
+        stats.totalQuestions = totalQuestions;
+        stats.totalAttempts = results.length;
         
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const todayAttempts = await Result.countDocuments({
+        stats.todayAttempts = await Result.countDocuments({
           submittedAt: { $gte: today }
         });
-        
-        stats = {
-          totalStudents,
-          totalQuestions,
-          totalAttempts: results.length,
-          averageScore: parseFloat(averageScore.toFixed(2)),
-          passRate: parseFloat(passRate.toFixed(2)),
-          todayAttempts
-        };
-      } catch (dbError) {
-        console.error('Dashboard DB error:', dbError.message);
+      } catch (error) {
+        console.error('Dashboard error:', error.message);
       }
     }
     
     res.json({
       success: true,
       stats,
-      database: getDatabaseStatus(),
-      user: req.user
+      database: isMongoDBConnected
     });
     
   } catch (error) {
@@ -1102,58 +748,16 @@ app.get('/api/admin/dashboard', authenticateAdmin, async (req, res) => {
 // 11. Get All Questions (Admin)
 app.get('/api/admin/questions', authenticateAdmin, async (req, res) => {
   try {
-    const { category = 'all', search = '', page = 1, limit = 100 } = req.query;
-    
     let questions = [];
-    let total = 0;
-    let source = 'memory';
     
     if (isMongoDBConnected) {
-      try {
-        let query = {};
-        
-        if (category !== 'all') {
-          query.category = category.toLowerCase();
-        }
-        
-        if (search && search.trim() !== '') {
-          query.$or = [
-            { questionText: { $regex: search.trim(), $options: 'i' } },
-            { 'options.text': { $regex: search.trim(), $options: 'i' } }
-          ];
-        }
-        
-        const skip = (parseInt(page) - 1) * parseInt(limit);
-        
-        questions = await Question.find(query)
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(parseInt(limit));
-        
-        total = await Question.countDocuments(query);
-        source = 'mongodb';
-        
-      } catch (dbError) {
-        console.error('Questions fetch error:', dbError.message);
-      }
-    }
-    
-    // If no questions from DB, use sample
-    if (questions.length === 0) {
-      questions = getSampleQuestions('html');
-      total = questions.length;
-      source = 'sample';
+      questions = await Question.find().sort({ createdAt: -1 });
     }
     
     res.json({
       success: true,
       questions,
-      total,
-      page: parseInt(page),
-      limit: parseInt(limit),
-      pages: Math.ceil(total / parseInt(limit)),
-      source,
-      database: getDatabaseStatus()
+      database: isMongoDBConnected
     });
     
   } catch (error) {
@@ -1170,7 +774,6 @@ app.post('/api/admin/questions', authenticateAdmin, async (req, res) => {
   try {
     const { category, questionText, options, marks = 1, difficulty = 'medium' } = req.body;
     
-    // Validation
     if (!category || !questionText || !options || options.length < 2) {
       return res.status(400).json({
         success: false,
@@ -1178,7 +781,6 @@ app.post('/api/admin/questions', authenticateAdmin, async (req, res) => {
       });
     }
     
-    // Validate exactly one correct option
     const correctOptions = options.filter(opt => opt.isCorrect);
     if (correctOptions.length !== 1) {
       return res.status(400).json({
@@ -1187,9 +789,8 @@ app.post('/api/admin/questions', authenticateAdmin, async (req, res) => {
       });
     }
     
-    // Prepare question data
     const questionData = {
-      category: category.toLowerCase().trim(),
+      category: category.toLowerCase(),
       questionText: questionText.trim(),
       options: options.map(opt => ({
         text: opt.text.trim(),
@@ -1200,35 +801,16 @@ app.post('/api/admin/questions', authenticateAdmin, async (req, res) => {
     };
     
     let savedQuestion = null;
-    let source = 'memory';
     
-    // Save to MongoDB if connected
     if (isMongoDBConnected) {
-      try {
-        savedQuestion = await Question.create(questionData);
-        source = 'mongodb';
-        console.log('✅ Question saved to MongoDB:', savedQuestion._id);
-      } catch (dbError) {
-        console.error('Question save error:', dbError.message);
-      }
-    }
-    
-    // Create memory ID if not saved to DB
-    if (!savedQuestion) {
-      savedQuestion = {
-        ...questionData,
-        _id: 'memory_' + Date.now(),
-        createdAt: new Date()
-      };
-      source = 'memory';
+      savedQuestion = await Question.create(questionData);
     }
     
     res.json({
       success: true,
-      message: `✅ Question added successfully! (${source})`,
-      question: savedQuestion,
-      source,
-      database: getDatabaseStatus()
+      message: '✅ Question added successfully!',
+      question: savedQuestion || questionData,
+      database: isMongoDBConnected
     });
     
   } catch (error) {
@@ -1244,25 +826,15 @@ app.post('/api/admin/questions', authenticateAdmin, async (req, res) => {
 app.get('/api/admin/results', authenticateAdmin, async (req, res) => {
   try {
     let results = [];
-    let source = 'memory';
     
     if (isMongoDBConnected) {
-      try {
-        results = await Result.find()
-          .sort({ submittedAt: -1 })
-          .limit(1000);
-        source = 'mongodb';
-      } catch (dbError) {
-        console.error('Results fetch error:', dbError.message);
-      }
+      results = await Result.find().sort({ submittedAt: -1 });
     }
     
     res.json({
       success: true,
-      results: results,
-      count: results.length,
-      source,
-      database: getDatabaseStatus()
+      results,
+      database: isMongoDBConnected
     });
     
   } catch (error) {
@@ -1279,25 +851,14 @@ app.delete('/api/admin/questions/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     
-    let deleted = false;
-    
     if (isMongoDBConnected) {
-      try {
-        const result = await Question.findByIdAndDelete(id);
-        if (result) {
-          deleted = true;
-          console.log('✅ Question deleted from MongoDB:', id);
-        }
-      } catch (dbError) {
-        console.error('Delete question error:', dbError.message);
-      }
+      await Question.findByIdAndDelete(id);
     }
     
     res.json({
       success: true,
       message: 'Question deleted successfully',
-      deleted_from_db: deleted,
-      database: getDatabaseStatus()
+      database: isMongoDBConnected
     });
     
   } catch (error) {
@@ -1314,25 +875,14 @@ app.delete('/api/admin/results/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     
-    let deleted = false;
-    
     if (isMongoDBConnected) {
-      try {
-        const result = await Result.findByIdAndDelete(id);
-        if (result) {
-          deleted = true;
-          console.log('✅ Result deleted from MongoDB:', id);
-        }
-      } catch (dbError) {
-        console.error('Delete result error:', dbError.message);
-      }
+      await Result.findByIdAndDelete(id);
     }
     
     res.json({
       success: true,
       message: 'Result deleted successfully',
-      deleted_from_db: deleted,
-      database: getDatabaseStatus()
+      database: isMongoDBConnected
     });
     
   } catch (error) {
@@ -1347,23 +897,14 @@ app.delete('/api/admin/results/:id', authenticateAdmin, async (req, res) => {
 // 16. Delete All Results
 app.delete('/api/admin/results', authenticateAdmin, async (req, res) => {
   try {
-    let deleted = false;
-    
     if (isMongoDBConnected) {
-      try {
-        await Result.deleteMany({});
-        deleted = true;
-        console.log('✅ All results deleted from MongoDB');
-      } catch (dbError) {
-        console.error('Delete all results error:', dbError.message);
-      }
+      await Result.deleteMany({});
     }
     
     res.json({
       success: true,
       message: 'All results deleted successfully',
-      deleted_from_db: deleted,
-      database: getDatabaseStatus()
+      database: isMongoDBConnected
     });
     
   } catch (error) {
@@ -1375,27 +916,23 @@ app.delete('/api/admin/results', authenticateAdmin, async (req, res) => {
   }
 });
 
-// 17. Reset Admin (for testing)
+// 17. Reset Admin
 app.post('/admin/reset', async (req, res) => {
   try {
     if (isMongoDBConnected) {
-      // Delete existing admin
       await Admin.deleteMany({});
       
-      // Create new admin
       const hashedPassword = await bcrypt.hash('admin123', 10);
       await Admin.create({
         username: 'admin',
         password: hashedPassword
       });
-      
-      console.log('✅ Admin reset successfully');
     }
     
     res.json({
       success: true,
-      message: 'Admin reset successfully. Use admin/admin123 to login.',
-      database: getDatabaseStatus()
+      message: 'Admin reset successfully',
+      database: isMongoDBConnected
     });
     
   } catch (error) {
@@ -1407,102 +944,42 @@ app.post('/admin/reset', async (req, res) => {
   }
 });
 
-// 18. Database Status
-app.get('/api/db-status', (req, res) => {
-  const status = getDatabaseStatus();
-  
-  res.json({
-    success: true,
-    status,
-    mongoose: {
-      readyState: mongoose.connection?.readyState || 0,
-      states: ['disconnected', 'connected', 'connecting', 'disconnecting']
-    }
-  });
-});
-
-// 19. Test Endpoint
-app.get('/api/test', (req, res) => {
-  res.json({
-    success: true,
-    message: '✅ API is working!',
-    timestamp: new Date().toISOString(),
-    database: getDatabaseStatus(),
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
-
 // 404 Handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: 'Route not found',
-    requestedUrl: req.originalUrl,
-    method: req.method
+    message: 'Route not found'
   });
 });
 
 // Error Handler
 app.use((err, req, res, next) => {
-  console.error('🚨 Server error:', err);
-  
+  console.error('Server error:', err);
   res.status(500).json({
     success: false,
-    message: 'Internal server error',
-    error: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+    message: 'Internal server error'
   });
 });
 
 // ==================== START SERVER ====================
 const startServer = async () => {
   try {
-    // Connect to MongoDB
     await connectToMongoDB();
-    
-    // Initialize database
     await initializeDatabase();
     
-    // Start server
-    const server = app.listen(PORT, () => {
+    app.listen(PORT, () => {
       console.log(`\n🚀 Server running on port ${PORT}`);
       console.log(`🌐 http://localhost:${PORT}`);
       console.log(`🔐 Admin login: admin / admin123`);
       console.log(`✅ MongoDB: ${isMongoDBConnected ? 'CONNECTED 🎉' : 'DISCONNECTED'}`);
-      console.log(`📅 Server started: ${new Date().toISOString()}`);
-      console.log(`\n📋 Available endpoints:`);
-      console.log(`   GET  /              - API Information`);
-      console.log(`   GET  /api/health    - Health Check`);
-      console.log(`   POST /admin/login   - Admin Login`);
-      console.log(`   GET  /api/config    - Get Configuration`);
-      console.log(`   PUT  /api/config    - Update Configuration`);
-      console.log(`   GET  /api/categories- Get Categories`);
-      console.log(`   POST /api/register  - Register Student`);
-      console.log(`   GET  /api/quiz/questions/:category - Get Quiz Questions`);
-      console.log(`   POST /api/quiz/submit - Submit Quiz`);
-    });
-    
-    // Handle graceful shutdown
-    process.on('SIGINT', async () => {
-      console.log('\n🛑 Shutting down server...');
-      
-      if (isMongoDBConnected) {
-        await mongoose.disconnect();
-        console.log('✅ MongoDB disconnected');
-      }
-      
-      server.close(() => {
-        console.log('✅ Server closed');
-        process.exit(0);
-      });
     });
     
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
+    console.error('Failed to start server:', error);
     process.exit(1);
   }
 };
 
-// Start the server
 startServer();
 
 module.exports = app;
